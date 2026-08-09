@@ -35,6 +35,7 @@ const fixture = {
   ],
   questions: [
     { ask_id: 'ask1', slot: 'q1', ts: NOW - 900, questions: [{ question: 'Which AWS account should I deploy to?', options: ['dev', 'prod'] }] },
+    { ask_id: 'ask2', slot: 'q1', ts: NOW - 800, questions: [{ question: 'Also: which region?', options: ['us-east-1'] }] },
   ],
   approvals: [
     { id: 'bg1', source: 'cron:log-patrol', tool: 'execute_bash', tool_purpose: 'rotate logs', ts: NOW - 50 },
@@ -52,6 +53,7 @@ const html = renderToStaticMarkup(h(Board, {
 const mustContain = [
   'Needs you', 'Working', 'On a mission', 'Quiet',
   'Which AWS account should I deploy to?', 'dev', 'prod',            // question card w/ text + options
+  '+1 more question queued',                                          // second pending ask surfaced
   'execute_bash', 'Approve', 'Deny',                                  // approval card
   'PLAN GATE', 'Go All',                                              // plan card
   'Strip it back', 'Park it',                                         // choice card

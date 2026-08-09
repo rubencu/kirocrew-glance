@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback, createElement as h, Fragment 
 import { useNavigate } from '@kirocrew/app-sdk'
 import { classify, toEpoch, rel, loopKind, loopGoal, itemKey, loopNextFire } from './classify.mjs'
 
-const VERSION = '1.3.0'
+const VERSION = '1.3.1'
 const ACCENT = 'var(--accent, #7c3aed)'
 const ACCENT_TINT = 'rgba(124, 58, 237, .14)'
 const DANGER = 'var(--danger, #b91c1c)'
@@ -75,7 +75,8 @@ function trackSeen(keys, now) {
 }
 
 // Fire a desktop notification once per attention item (dedup persisted).
-function notifyNew(items, enabled) {
+// Click focuses the dashboard and jumps to the session.
+function notifyNew(items, enabled, navigate) {
   if (!enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   const notified = readStore(NOTIFIED_KEY)
   const next = {}
@@ -85,9 +86,14 @@ function notifyNew(items, enabled) {
     if (notified[k]) continue
     const title = item.slot ? (item.slot.title || item.slot.key) : ((item.appr && item.appr.source) || 'background')
     const kindLabel = { question: 'has a question', approval: 'wants an approval', bgApproval: 'wants an approval', plan: 'plan awaits Go', choice: 'offers choices', capped: 'loop ran out of rope', stalled: 'looks stalled (30m+ without activity)' }[item.kind] || 'needs you'
+    const slotKey = item.slot ? item.slot.key : ''
     try {
       const n = new Notification('Glance — ' + title, { body: kindLabel, tag: 'glance-' + k })
-      n.onclick = () => { window.focus(); n.close() }
+      n.onclick = () => {
+        window.focus()
+        if (slotKey && navigate) navigate('/chat?sid=' + encodeURIComponent(slotKey))
+        n.close()
+      }
     } catch { /* notification construction can throw on some platforms */ }
   }
   writeStore(NOTIFIED_KEY, next) // pruned to live items — re-appearance re-notifies
@@ -221,6 +227,7 @@ function QuestionCard({ item, now, navigate, onDone, fresh }) {
     setAnswers(next)
     if (qs.every((q) => next[q.text])) submit(next)
   }
+  const queued = item.asks.length - 1
 
   return card([
     h(CardHeader, { key: 'h', item, now, navigate, label: 'QUESTION', labelBg: ACCENT_TINT, labelFg: ACCENT, fresh }),
@@ -243,6 +250,8 @@ function QuestionCard({ item, now, navigate, onDone, fresh }) {
         }),
       ),
     )),
+    queued > 0 ? h('div', { key: '__queued', style: { fontSize: 10, color: 'var(--muted)', marginTop: 2 } },
+      '+' + queued + ' more question' + (queued > 1 ? 's' : '') + ' queued — appears after this one is answered') : null,
   ], ACCENT)
 }
 
@@ -547,8 +556,8 @@ export default function GlanceApp() {
     const nowS = Date.now() / 1000
     const items = classify(data, nowS).needsYou
     setFirstSeen(trackSeen(items.map(itemKey), nowS))
-    notifyNew(items, notify)
-  }, [data, notify])
+    notifyNew(items, notify, navigate)
+  }, [data, notify, navigate])
 
   const toggleNotify = useCallback(() => {
     const next = !notify
