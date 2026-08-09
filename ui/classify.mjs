@@ -1,6 +1,8 @@
 // Glance classifier — pure functions, no React. Unit-tested in ../tests.
 export const DAY = 86400
 export const CAPPED_WINDOW = 2 * DAY
+export const STALL_SECS = 600 // running turn with no activity this long → possibly stuck
+export const NEAR_CAP_FRACTION = 0.8 // loop at ≥80% of its cap → early warning
 
 export function toEpoch(v) {
   if (v == null) return 0
@@ -28,6 +30,24 @@ export function loopGoal(lp) {
   const msg = lp.message || ''
   const m = msg.match(/^Goal:\s*(.+)$/m)
   return (m ? m[1] : msg.split('\n')[0]).slice(0, 160)
+}
+
+// Loop at ≥80% of its cycle cap or runtime budget → about to run out of rope.
+export function loopNearCap(lp, now) {
+  if (!lp.active) return false
+  if (lp.max_cycles > 0 && lp.cycle_count >= NEAR_CAP_FRACTION * lp.max_cycles) return true
+  if (lp.max_runtime_secs > 0) {
+    const created = toEpoch(lp.created_ts)
+    if (created && now - created >= NEAR_CAP_FRACTION * lp.max_runtime_secs) return true
+  }
+  return false
+}
+
+// Stable identity for an attention item — used for NEW pills and notification dedup.
+export function itemKey(item) {
+  if (item.kind === 'bgApproval') return 'bg-' + item.appr.id
+  if (item.kind === 'question') return 'q-' + item.asks[0].ask_id
+  return item.kind + '-' + item.slot.key
 }
 
 export function planOptions(s) {
@@ -70,9 +90,9 @@ export function classify(data, now) {
     } else if (lp && !lp.active && ['cycle_cap', 'runtime_budget'].includes(lp.stopped_reason) && now - toEpoch(lp.last_fire_ts) < CAPPED_WINDOW) {
       out.needsYou.push({ kind: 'capped', slot: s, loop: lp, waitTs: toEpoch(lp.last_fire_ts) })
     } else if (lp && lp.active) {
-      out.mission.push({ slot: s, loop: lp, lastTs })
+      out.mission.push({ slot: s, loop: lp, lastTs, nearCap: loopNearCap(lp, now) })
     } else if (s.running || s.orchestrating || s.stopping) {
-      out.working.push({ slot: s, lastTs })
+      out.working.push({ slot: s, lastTs, stalled: !s.stopping && now - lastTs > STALL_SECS })
     } else {
       const age = now - lastTs
       if (age < DAY) out.quietToday.push({ slot: s, lastTs })
@@ -84,7 +104,7 @@ export function classify(data, now) {
   // Loops with no visible slot (research campaigns, channel-bound monitors)
   for (const lp of loops) {
     if (matchedLoops.has(lp.slot_key) || !lp.active) continue
-    out.mission.push({ slot: null, loop: lp, lastTs: toEpoch(lp.last_fire_ts) || toEpoch(lp.created_ts) })
+    out.mission.push({ slot: null, loop: lp, lastTs: toEpoch(lp.last_fire_ts) || toEpoch(lp.created_ts), nearCap: loopNearCap(lp, now) })
   }
 
   // Background approvals (cron/subagent sources) — always attention

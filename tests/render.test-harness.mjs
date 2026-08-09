@@ -17,7 +17,9 @@ const fixture = {
     { key: 'p1', title: 'Auth migration', agent: 'kirocrew', mode: 'orchestrator', app: '', running: false, has_options: true, options: ['Go', 'Go All', 'Cancel'], pending_approval: false, prompt_preview: 'Plan: migrate auth', last_activity_ts: NOW - 3600 },
     { key: 'c1', title: 'PR #2131 babysit', agent: 'kirocrew', mode: 'chat', app: '', running: false, has_options: true, options: ['Strip it back', 'Park it'], pending_approval: false, prompt_preview: 'GPT blocked round 5', last_activity_ts: NOW - 7200 },
     { key: 'w1', title: 'Building the fix', agent: 'kirocrew', mode: 'chat', app: '', running: true, has_options: false, options: [], pending_approval: false, last_message: 'running pytest…', queue_depth: 2, last_activity_ts: NOW - 30 },
+    { key: 'w2', title: 'Hung migration', agent: 'kirocrew', mode: 'chat', app: '', running: true, has_options: false, options: [], pending_approval: false, last_message: 'applying schema…', queue_depth: 0, last_activity_ts: NOW - 1200 },
     { key: 'm1', title: 'PR #2279 watch', agent: 'kirocrew', mode: 'chat', app: '', running: false, has_options: false, options: [], pending_approval: false, last_activity_ts: NOW - 400 },
+    { key: 'm2', title: 'Nearly-capped watch', agent: 'kirocrew', mode: 'chat', app: '', running: false, has_options: false, options: [], pending_approval: false, last_activity_ts: NOW - 200 },
     { key: 'quiet1', title: 'Yesterday chat', agent: 'kirocrew', mode: 'chat', app: '', running: false, has_options: false, options: [], pending_approval: false, last_activity_ts: NOW - 2 * 3600 },
     { key: 'quiet2', title: 'Last week thing', agent: 'kirocrew', mode: 'chat', app: '', running: false, has_options: false, options: [], pending_approval: false, last_activity_ts: NOW - 3 * DAY },
     { key: 'old1', title: 'Ancient session', agent: 'kirocrew', mode: 'chat', app: '', running: false, has_options: false, options: [], pending_approval: false, last_activity_ts: NOW - 30 * DAY },
@@ -26,6 +28,7 @@ const fixture = {
   loops: [
     { id: 'lp1', slot_key: 'm1', message: 'Check PR #2279 CI and reviews every cycle', idle_secs: 300, max_cycles: 24, cycle_count: 7, active: true, last_fire_ts: NOW - 400, created_ts: NOW - 9000, stop_sentinel_path: '', max_runtime_secs: 0, stopped_reason: '' },
     { id: 'lp2', slot_key: 'research-cafebabe', message: 'Run the next research cycle for campaign cafebabe', idle_secs: 60, max_cycles: 0, cycle_count: 4, active: true, last_fire_ts: NOW - 100, created_ts: NOW - 5000, stop_sentinel_path: '/x/STOP', max_runtime_secs: 0, stopped_reason: '' },
+    { id: 'lp3', slot_key: 'm2', message: 'Watch the deploy until healthy', idle_secs: 300, max_cycles: 24, cycle_count: 22, active: true, last_fire_ts: NOW - 200, created_ts: NOW - 20000, stop_sentinel_path: '', max_runtime_secs: 0, stopped_reason: '' },
   ],
   questions: [
     { ask_id: 'ask1', slot: 'q1', ts: NOW - 900, questions: [{ question: 'Which AWS account should I deploy to?', options: ['dev', 'prod'] }] },
@@ -40,6 +43,7 @@ const c = classify(fixture, NOW)
 assert.equal(c.needsYou.length, 5, 'needsYou: question, approval, plan, choice, bgApproval')
 const html = renderToStaticMarkup(h(Board, {
   c, now: NOW, navigate: () => {}, onAction: () => {}, showOlder: true, setShowOlder: () => {},
+  firstSeen: { 'q-ask1': NOW - 10 }, // question just appeared → NEW pill
 }))
 
 const mustContain = [
@@ -50,8 +54,11 @@ const mustContain = [
   'Strip it back', 'Park it',                                         // choice card
   'cron:log-patrol',                                                  // bg approval card
   'Building the fix', 'running pytest…', '+2',                        // working tile w/ queue pill
+  'Hung migration', 'stalled 20m',                                    // stalled working tile
   'Check PR #2279 CI and reviews', '7/24',                            // mission tile (monitor)
+  '⚠ 22/24',                                                          // near-cap mission tile
   '4/∞', 'Research cafebabe',                                         // standalone research loop
+  'NEW',                                                              // fresh attention item pill
   'Yesterday chat', 'Last week thing',                                // quiet chips
   '1 older', 'Ancient session',                                       // older chips expanded
 ]

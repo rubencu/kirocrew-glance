@@ -1,7 +1,7 @@
 // Unit tests for the Glance classifier. Run: node --test tests/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, toEpoch, rel, loopKind, loopGoal, planOptions, DAY } from '../ui/classify.mjs'
+import { classify, toEpoch, rel, loopKind, loopGoal, planOptions, loopNearCap, itemKey, DAY, STALL_SECS } from '../ui/classify.mjs'
 
 const NOW = 1_800_000_000
 
@@ -164,4 +164,46 @@ test('working sorted most-recent first', () => {
     slots: [slot({ key: 'stale', running: true, last_activity_ts: NOW - 900 }), slot({ key: 'fresh', running: true, last_activity_ts: NOW - 10 })],
   }, NOW)
   assert.deepEqual(c.working.map((i) => i.slot.key), ['fresh', 'stale'])
+})
+
+// ---------- v1.2: proactive signals ----------
+
+test('stall detection: running with no activity past STALL_SECS → stalled', () => {
+  const c = classify({
+    ...empty,
+    slots: [
+      slot({ key: 'live', running: true, last_activity_ts: NOW - 30 }),
+      slot({ key: 'stuck', running: true, last_activity_ts: NOW - STALL_SECS - 60 }),
+      slot({ key: 'stopping', stopping: true, last_activity_ts: NOW - STALL_SECS - 60 }),
+    ],
+  }, NOW)
+  const byKey = Object.fromEntries(c.working.map((i) => [i.slot.key, i.stalled]))
+  assert.equal(byKey.live, false)
+  assert.equal(byKey.stuck, true)
+  assert.equal(byKey.stopping, false, 'stopping is expected to be slow — never flagged')
+})
+
+test('loopNearCap: cycle cap at 80%, runtime budget at 80%, inactive never', () => {
+  assert.ok(loopNearCap(loop({ cycle_count: 20, max_cycles: 24 }), NOW))
+  assert.ok(!loopNearCap(loop({ cycle_count: 10, max_cycles: 24 }), NOW))
+  assert.ok(!loopNearCap(loop({ cycle_count: 100, max_cycles: 0 }), NOW), 'uncapped loop never warns')
+  assert.ok(loopNearCap(loop({ max_cycles: 0, max_runtime_secs: 1000, created_ts: NOW - 900 }), NOW))
+  assert.ok(!loopNearCap(loop({ max_cycles: 0, max_runtime_secs: 1000, created_ts: NOW - 100 }), NOW))
+  assert.ok(!loopNearCap(loop({ active: false, cycle_count: 24, max_cycles: 24 }), NOW))
+})
+
+test('classify stamps nearCap on bound and standalone mission rows', () => {
+  const bound = loop({ slot_key: 'chat-1', cycle_count: 23, max_cycles: 24 })
+  const standalone = loop({ id: 'lp2', slot_key: 'research-feed', cycle_count: 1, max_cycles: 24 })
+  const c = classify({ ...empty, slots: [slot()], loops: [bound, standalone] }, NOW)
+  const byId = Object.fromEntries(c.mission.map((i) => [i.loop.id, i.nearCap]))
+  assert.equal(byId['aabbccdd'], true)
+  assert.equal(byId['lp2'], false)
+})
+
+test('itemKey: stable identity per attention item kind', () => {
+  assert.equal(itemKey({ kind: 'question', slot: slot(), asks: [{ ask_id: 'a9' }] }), 'q-a9')
+  assert.equal(itemKey({ kind: 'approval', slot: slot({ key: 's7' }) }), 'approval-s7')
+  assert.equal(itemKey({ kind: 'bgApproval', appr: { id: 'bg3' } }), 'bg-bg3')
+  assert.equal(itemKey({ kind: 'choice', slot: slot({ key: 's7' }) }), 'choice-s7')
 })

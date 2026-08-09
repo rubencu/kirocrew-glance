@@ -56,6 +56,27 @@ Everything else. No "done" button — done-ness is inferred by decay:
 `2 need you · 3 working · 4 on a mission · 28 quiet` — the whole state of the
 world in one line. Tab badge count = NEEDS YOU count only.
 
+## Proactive signals (v1.2)
+
+Glance doesn't just show state — it warns before things go wrong and tells you
+when something new needs you. All derived, still zero management:
+
+- **Desktop notifications** (opt-in 🔔 in header, persisted in localStorage):
+  fires once per new NEEDS YOU item (dedup by stable item identity, persisted;
+  resolved items are pruned so a re-appearance re-notifies). Enabling seeds the
+  dedup store with the current backlog so it never burst-notifies.
+- **Stall detection**: a slot `running`/`orchestrating` with no activity for
+  >10 min (`STALL_SECS`) is flagged — amber dot, "stalled Nm" pill, header
+  count. `stopping` is exempt (expected to be slow). Catches hung turns.
+- **Loop near-cap early warning**: an active loop at ≥80% of `max_cycles` or
+  `max_runtime_secs` gets an amber ⚠ pill — see it running out of rope BEFORE
+  it dies, instead of only the post-mortem "LOOP ENDED" card.
+- **Attention aging**: waiting time on cards escalates muted → amber (≥1h) →
+  red (≥4h). Overdue items are visually loud.
+- **NEW pills**: attention items that appeared within the last 5 min carry a
+  NEW pill (first-seen tracked in localStorage; first-ever visit is seeded as
+  seen to avoid a NEW burst).
+
 ## Interactions (all optional — reading is the product)
 - Click any row/card → navigate to the session in chat (useNavigate).
 - Question/choice cards: answer inline (POST the same endpoints the chat UI uses)
