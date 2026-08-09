@@ -1,0 +1,19 @@
+{
+  "name": "glance",
+  "displayName": "Glance",
+  "version": "1.1.0",
+  "description": "Auto-triaged session board: what needs you, what's working, what's on a mission, what's quiet — at a glance, zero management.",
+  "author": "rubencu",
+  "tags": ["sessions", "triage", "productivity", "attention"],
+  "permissions": {},
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [
+      {
+        "route": "/glance",
+        "label": "Glance",
+        "iconUrl": "icon.svg"
+      }
+    ]
+  }
+}

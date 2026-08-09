@@ -1,0 +1,6 @@
+/build
+/release-info
+.app_secret
+app-crons.json
+installed.json
+data/
