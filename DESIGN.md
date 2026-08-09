@@ -77,6 +77,25 @@ when something new needs you. All derived, still zero management:
   NEW pill (first-seen tracked in localStorage; first-ever visit is seeded as
   seen to avoid a NEW burst).
 
+## Act from the board (v1.3)
+
+The two dead-ends that used to force opening a session get one-click paths:
+
+- **STALLED card** (escalation): a turn hung >30 min (`STALL_ESCALATE_SECS`)
+  is promoted from a Working pill to a Needs You card — whether or not a loop
+  is bound (a hung mission turn beats its Mission row). Action: **Stop turn**
+  (cooperative `POST /api/chat/slots/{slot}/stop` — same endpoint as the chat
+  UI's Stop button; never force-kills). Guards: `stopping` exempt, slots with
+  no timestamps exempt.
+- **Resume loop** on LOOP ENDED cards: posts a background message into the
+  same slot (`POST /api/chat?ws=1`) instructing the agent to re-arm its loop
+  (monitor_start / monitor_update) and continue toward the goal, or report
+  what it's blocked on. The agent decides — the board never re-arms loops
+  itself.
+- **Next-fire ETA** on Mission tiles: `last_fire_ts + idle_secs` → "in 3m" /
+  "due" (hidden while a turn is running). The idle gap is measured from turn
+  end, so this is a floor, not a promise.
+
 ## Interactions (all optional — reading is the product)
 - Click any row/card → navigate to the session in chat (useNavigate).
 - Question/choice cards: answer inline (POST the same endpoints the chat UI uses)

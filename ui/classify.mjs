@@ -2,6 +2,7 @@
 export const DAY = 86400
 export const CAPPED_WINDOW = 2 * DAY
 export const STALL_SECS = 600 // running turn with no activity this long → possibly stuck
+export const STALL_ESCALATE_SECS = 1800 // no activity this long while running → attention card
 export const NEAR_CAP_FRACTION = 0.8 // loop at ≥80% of its cap → early warning
 
 export function toEpoch(v) {
@@ -41,6 +42,14 @@ export function loopNearCap(lp, now) {
     if (created && now - created >= NEAR_CAP_FRACTION * lp.max_runtime_secs) return true
   }
   return false
+}
+
+// When an active loop is expected to fire next (epoch secs), 0 if unknown.
+// The idle gap is measured from turn END, so this is a floor, not a promise.
+export function loopNextFire(lp) {
+  const last = toEpoch(lp.last_fire_ts) || toEpoch(lp.created_ts)
+  if (!last || !lp.idle_secs) return 0
+  return last + lp.idle_secs
 }
 
 // Stable identity for an attention item — used for NEW pills and notification dedup.
@@ -89,10 +98,13 @@ export function classify(data, now) {
       out.needsYou.push({ kind: 'choice', slot: s, waitTs: lastTs })
     } else if (lp && !lp.active && ['cycle_cap', 'runtime_budget'].includes(lp.stopped_reason) && now - toEpoch(lp.last_fire_ts) < CAPPED_WINDOW) {
       out.needsYou.push({ kind: 'capped', slot: s, loop: lp, waitTs: toEpoch(lp.last_fire_ts) })
+    } else if ((s.running || s.orchestrating) && !s.stopping && lastTs > 0 && now - lastTs > STALL_ESCALATE_SECS) {
+      // A turn hung this long needs a human whether or not a loop is bound.
+      out.needsYou.push({ kind: 'stalled', slot: s, waitTs: lastTs })
     } else if (lp && lp.active) {
       out.mission.push({ slot: s, loop: lp, lastTs, nearCap: loopNearCap(lp, now) })
     } else if (s.running || s.orchestrating || s.stopping) {
-      out.working.push({ slot: s, lastTs, stalled: !s.stopping && now - lastTs > STALL_SECS })
+      out.working.push({ slot: s, lastTs, stalled: !s.stopping && lastTs > 0 && now - lastTs > STALL_SECS })
     } else {
       const age = now - lastTs
       if (age < DAY) out.quietToday.push({ slot: s, lastTs })

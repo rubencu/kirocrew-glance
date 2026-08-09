@@ -1,7 +1,7 @@
 // Unit tests for the Glance classifier. Run: node --test tests/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, toEpoch, rel, loopKind, loopGoal, planOptions, loopNearCap, itemKey, DAY, STALL_SECS } from '../ui/classify.mjs'
+import { classify, toEpoch, rel, loopKind, loopGoal, planOptions, loopNearCap, loopNextFire, itemKey, DAY, STALL_SECS, STALL_ESCALATE_SECS } from '../ui/classify.mjs'
 
 const NOW = 1_800_000_000
 
@@ -206,4 +206,48 @@ test('itemKey: stable identity per attention item kind', () => {
   assert.equal(itemKey({ kind: 'approval', slot: slot({ key: 's7' }) }), 'approval-s7')
   assert.equal(itemKey({ kind: 'bgApproval', appr: { id: 'bg3' } }), 'bg-bg3')
   assert.equal(itemKey({ kind: 'choice', slot: slot({ key: 's7' }) }), 'choice-s7')
+  assert.equal(itemKey({ kind: 'stalled', slot: slot({ key: 's7' }) }), 'stalled-s7')
+})
+
+// ---------- v1.3: act from the board ----------
+
+test('stall escalation: hung past STALL_ESCALATE_SECS → needsYou stalled card', () => {
+  const c = classify({
+    ...empty,
+    slots: [slot({ key: 'hung', running: true, last_activity_ts: NOW - STALL_ESCALATE_SECS - 60 })],
+  }, NOW)
+  assert.equal(c.needsYou.length, 1)
+  assert.equal(c.needsYou[0].kind, 'stalled')
+  assert.equal(c.working.length, 0)
+})
+
+test('stall escalation beats mission for a hung loop-bound turn', () => {
+  const c = classify({
+    ...empty,
+    slots: [slot({ running: true, last_activity_ts: NOW - STALL_ESCALATE_SECS - 60 })],
+    loops: [loop()],
+  }, NOW)
+  assert.equal(c.needsYou[0].kind, 'stalled')
+  assert.equal(c.mission.length, 0)
+})
+
+test('stall escalation guards: stopping exempt, missing timestamps exempt, 10–30 min stays working', () => {
+  const c = classify({
+    ...empty,
+    slots: [
+      slot({ key: 'stopping', stopping: true, running: true, last_activity_ts: NOW - 2 * STALL_ESCALATE_SECS }),
+      slot({ key: 'no-ts', running: true, last_activity_ts: null, created: null }),
+      slot({ key: 'mid', running: true, last_activity_ts: NOW - STALL_SECS - 60 }),
+    ],
+  }, NOW)
+  assert.equal(c.needsYou.length, 0)
+  assert.equal(c.working.length, 3)
+  assert.equal(c.working.find((w) => w.slot.key === 'mid').stalled, true)
+})
+
+test('loopNextFire: last fire + idle gap, created fallback, 0 when unknowable', () => {
+  assert.equal(loopNextFire(loop({ last_fire_ts: NOW - 100, idle_secs: 300 })), NOW + 200)
+  assert.equal(loopNextFire(loop({ last_fire_ts: null, created_ts: NOW - 50, idle_secs: 60 })), NOW + 10)
+  assert.equal(loopNextFire(loop({ last_fire_ts: null, created_ts: null })), 0)
+  assert.equal(loopNextFire(loop({ idle_secs: 0 })), 0)
 })

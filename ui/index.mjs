@@ -4,17 +4,26 @@
 // v1.1: density-first layout — full width, card grid, 2-line tiles, quiet chips.
 // v1.2: proactive — desktop notifications, stall detection, loop near-cap
 // early warning, attention aging, NEW pills. Still zero management.
+// v1.3: act from the board — stop hung turns, resume capped loops, next-fire ETA.
 import { useState, useEffect, useRef, useCallback, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { classify, toEpoch, rel, loopKind, loopGoal, itemKey } from './classify.mjs'
+import { classify, toEpoch, rel, loopKind, loopGoal, itemKey, loopNextFire } from './classify.mjs'
 
-const VERSION = '1.2.0'
+const VERSION = '1.3.0'
 const ACCENT = 'var(--accent, #7c3aed)'
 const ACCENT_TINT = 'rgba(124, 58, 237, .14)'
 const DANGER = 'var(--danger, #b91c1c)'
+const DANGER_TINT = 'rgba(185, 28, 28, .12)'
 const OK = 'var(--ok, #047857)'
 const WARN = '#b45309'
 const WARN_TINT = 'rgba(180, 83, 9, .14)'
+
+// Future-duration formatter (rel() is past-only).
+function fut(secs) {
+  if (secs < 60) return 'soon'
+  if (secs < 3600) return 'in ' + Math.floor(secs / 60) + 'm'
+  return 'in ' + Math.floor(secs / 3600) + 'h'
+}
 
 // ---------- data ----------
 
@@ -75,7 +84,7 @@ function notifyNew(items, enabled) {
     next[k] = 1
     if (notified[k]) continue
     const title = item.slot ? (item.slot.title || item.slot.key) : ((item.appr && item.appr.source) || 'background')
-    const kindLabel = { question: 'has a question', approval: 'wants an approval', bgApproval: 'wants an approval', plan: 'plan awaits Go', choice: 'offers choices', capped: 'loop ran out of rope' }[item.kind] || 'needs you'
+    const kindLabel = { question: 'has a question', approval: 'wants an approval', bgApproval: 'wants an approval', plan: 'plan awaits Go', choice: 'offers choices', capped: 'loop ran out of rope', stalled: 'looks stalled (30m+ without activity)' }[item.kind] || 'needs you'
     try {
       const n = new Notification('Glance — ' + title, { body: kindLabel, tag: 'glance-' + k })
       n.onclick = () => { window.focus(); n.close() }
@@ -319,14 +328,60 @@ function ChoiceCard({ item, now, navigate, onDone, plan, fresh }) {
   ], ACCENT)
 }
 
-function CappedCard({ item, now, navigate, fresh }) {
+function CappedCard({ item, now, navigate, onDone, fresh }) {
+  const [busy, setBusy] = useState(false)
   const lp = item.loop
+  const s = item.slot
+  const capDesc = lp.stopped_reason === 'cycle_cap' ? 'cycle cap (' + lp.cycle_count + ')' : 'runtime budget'
+  const resume = async () => {
+    setBusy(true)
+    try {
+      // Background message into the same slot: the agent re-arms its own loop.
+      await fetch('/api/chat?ws=1', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot: s.key,
+          message: 'Your monitoring loop stopped after hitting its ' + capDesc +
+            ' without meeting the exit condition. If the goal is still worth pursuing, re-arm the loop' +
+            ' (monitor_start, or monitor_update with a higher cap) and continue; otherwise summarize' +
+            ' where things stand and what you need from me. Goal: ' + loopGoal(lp),
+        }),
+      })
+      onDone()
+    } finally { setBusy(false) }
+  }
   return card([
     h(CardHeader, { key: 'h', item, now, navigate, label: 'LOOP ENDED', labelBg: WARN_TINT, labelFg: WARN, fresh }),
-    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)' } },
-      (lp.stopped_reason === 'cycle_cap' ? 'Hit its cycle cap (' + lp.cycle_count + ') ' : 'Hit its runtime budget ') +
-      'without finishing: ' + loopGoal(lp)),
+    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6 } },
+      'Hit its ' + capDesc + ' without finishing: ' + loopGoal(lp)),
+    h('div', { key: 'a', style: { display: 'flex', gap: 5, alignItems: 'center' } },
+      h(SolidBtn, { disabled: busy, onClick: resume }, busy ? 'Resuming…' : 'Resume loop'),
+      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'asks the agent to re-arm and continue'),
+    ),
   ], WARN)
+}
+
+function StalledCard({ item, now, navigate, onDone, fresh }) {
+  const [busy, setBusy] = useState(false)
+  const s = item.slot
+  const stop = async () => {
+    setBusy(true)
+    try {
+      // Cooperative stop — same endpoint as the chat UI's Stop button.
+      await fetch('/api/chat/slots/' + encodeURIComponent(s.key) + '/stop', { method: 'POST' })
+      onDone()
+    } finally { setBusy(false) }
+  }
+  return card([
+    h(CardHeader, { key: 'h', item, now, navigate, label: 'STALLED', labelBg: DANGER_TINT, labelFg: DANGER, fresh }),
+    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6 } },
+      'Running with no activity for ' + rel(item.waitTs, now) + ' — the turn may be hung.' +
+      (s.last_message ? ' Last: ' + String(s.last_message).slice(0, 120) : '')),
+    h('div', { key: 'a', style: { display: 'flex', gap: 5, alignItems: 'center' } },
+      h(GhostBtn, { disabled: busy, danger: true, onClick: stop }, busy ? 'Stopping…' : 'Stop turn'),
+      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'cooperative stop — click title to inspect first'),
+    ),
+  ], DANGER)
 }
 
 // ---------- tiles (working / mission) ----------
@@ -366,6 +421,7 @@ function MissionTile({ item, now, navigate }) {
   const { slot: s, loop: lp } = item
   const kind = loopKind(lp)
   const running = s && (s.running || s.orchestrating)
+  const nf = loopNextFire(lp)
   const title = s ? (s.title || s.key) : (kind === 'research' ? 'Research ' + lp.slot_key.slice(9, 17) : lp.slot_key)
   return h('div', {
     style: tileStyle(),
@@ -380,6 +436,8 @@ function MissionTile({ item, now, navigate }) {
     ),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginTop: 1 } },
       ellip(loopGoal(lp), { fontSize: 11, color: 'var(--muted)', flex: 1 }),
+      !running && nf ? h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } },
+        nf > now ? fut(nf - now) : 'due') : null,
       h(Pill, item.nearCap ? { bg: WARN_TINT, fg: WARN } : { bg: ACCENT_TINT, fg: ACCENT },
         (item.nearCap ? '⚠ ' : '') + lp.cycle_count + '/' + (lp.max_cycles || '∞')),
     ),
@@ -422,7 +480,8 @@ export function Board({ c, now, navigate, onAction, showOlder, setShowOlder, fir
             if (item.kind === 'bgApproval') return h(BgApprovalCard, { key, item, now, onDone: onAction, fresh })
             if (item.kind === 'plan') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: true, fresh })
             if (item.kind === 'choice') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: false, fresh })
-            return h(CappedCard, { key, item, now, navigate, fresh })
+            if (item.kind === 'stalled') return h(StalledCard, { key, item, now, navigate, onDone: onAction, fresh })
+            return h(CappedCard, { key, item, now, navigate, onDone: onAction, fresh })
           }))
       : h('div', { style: { border: '1px dashed var(--border)', borderRadius: 6, padding: '6px 12px', marginBottom: 12, fontSize: 11, color: 'var(--muted)' } },
           'Nothing needs you right now ✨'),
