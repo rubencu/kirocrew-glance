@@ -1,7 +1,7 @@
 // Unit tests for the Glance classifier. Run: node --test tests/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, toEpoch, rel, loopKind, loopGoal, planOptions, DAY } from '../ui/classify.mjs'
+import { classify, toEpoch, rel, loopKind, loopGoal, planOptions, loopNearCap, loopNextFire, itemKey, DAY, STALL_SECS, STALL_ESCALATE_SECS } from '../ui/classify.mjs'
 
 const NOW = 1_800_000_000
 
@@ -164,4 +164,90 @@ test('working sorted most-recent first', () => {
     slots: [slot({ key: 'stale', running: true, last_activity_ts: NOW - 900 }), slot({ key: 'fresh', running: true, last_activity_ts: NOW - 10 })],
   }, NOW)
   assert.deepEqual(c.working.map((i) => i.slot.key), ['fresh', 'stale'])
+})
+
+// ---------- v1.2: proactive signals ----------
+
+test('stall detection: running with no activity past STALL_SECS → stalled', () => {
+  const c = classify({
+    ...empty,
+    slots: [
+      slot({ key: 'live', running: true, last_activity_ts: NOW - 30 }),
+      slot({ key: 'stuck', running: true, last_activity_ts: NOW - STALL_SECS - 60 }),
+      slot({ key: 'stopping', stopping: true, last_activity_ts: NOW - STALL_SECS - 60 }),
+    ],
+  }, NOW)
+  const byKey = Object.fromEntries(c.working.map((i) => [i.slot.key, i.stalled]))
+  assert.equal(byKey.live, false)
+  assert.equal(byKey.stuck, true)
+  assert.equal(byKey.stopping, false, 'stopping is expected to be slow — never flagged')
+})
+
+test('loopNearCap: cycle cap at 80%, runtime budget at 80%, inactive never', () => {
+  assert.ok(loopNearCap(loop({ cycle_count: 20, max_cycles: 24 }), NOW))
+  assert.ok(!loopNearCap(loop({ cycle_count: 10, max_cycles: 24 }), NOW))
+  assert.ok(!loopNearCap(loop({ cycle_count: 100, max_cycles: 0 }), NOW), 'uncapped loop never warns')
+  assert.ok(loopNearCap(loop({ max_cycles: 0, max_runtime_secs: 1000, created_ts: NOW - 900 }), NOW))
+  assert.ok(!loopNearCap(loop({ max_cycles: 0, max_runtime_secs: 1000, created_ts: NOW - 100 }), NOW))
+  assert.ok(!loopNearCap(loop({ active: false, cycle_count: 24, max_cycles: 24 }), NOW))
+})
+
+test('classify stamps nearCap on bound and standalone mission rows', () => {
+  const bound = loop({ slot_key: 'chat-1', cycle_count: 23, max_cycles: 24 })
+  const standalone = loop({ id: 'lp2', slot_key: 'research-feed', cycle_count: 1, max_cycles: 24 })
+  const c = classify({ ...empty, slots: [slot()], loops: [bound, standalone] }, NOW)
+  const byId = Object.fromEntries(c.mission.map((i) => [i.loop.id, i.nearCap]))
+  assert.equal(byId['aabbccdd'], true)
+  assert.equal(byId['lp2'], false)
+})
+
+test('itemKey: stable identity per attention item kind', () => {
+  assert.equal(itemKey({ kind: 'question', slot: slot(), asks: [{ ask_id: 'a9' }] }), 'q-a9')
+  assert.equal(itemKey({ kind: 'approval', slot: slot({ key: 's7' }) }), 'approval-s7')
+  assert.equal(itemKey({ kind: 'bgApproval', appr: { id: 'bg3' } }), 'bg-bg3')
+  assert.equal(itemKey({ kind: 'choice', slot: slot({ key: 's7' }) }), 'choice-s7')
+  assert.equal(itemKey({ kind: 'stalled', slot: slot({ key: 's7' }) }), 'stalled-s7')
+})
+
+// ---------- v1.3: act from the board ----------
+
+test('stall escalation: hung past STALL_ESCALATE_SECS → needsYou stalled card', () => {
+  const c = classify({
+    ...empty,
+    slots: [slot({ key: 'hung', running: true, last_activity_ts: NOW - STALL_ESCALATE_SECS - 60 })],
+  }, NOW)
+  assert.equal(c.needsYou.length, 1)
+  assert.equal(c.needsYou[0].kind, 'stalled')
+  assert.equal(c.working.length, 0)
+})
+
+test('stall escalation beats mission for a hung loop-bound turn', () => {
+  const c = classify({
+    ...empty,
+    slots: [slot({ running: true, last_activity_ts: NOW - STALL_ESCALATE_SECS - 60 })],
+    loops: [loop()],
+  }, NOW)
+  assert.equal(c.needsYou[0].kind, 'stalled')
+  assert.equal(c.mission.length, 0)
+})
+
+test('stall escalation guards: stopping exempt, missing timestamps exempt, 10–30 min stays working', () => {
+  const c = classify({
+    ...empty,
+    slots: [
+      slot({ key: 'stopping', stopping: true, running: true, last_activity_ts: NOW - 2 * STALL_ESCALATE_SECS }),
+      slot({ key: 'no-ts', running: true, last_activity_ts: null, created: null }),
+      slot({ key: 'mid', running: true, last_activity_ts: NOW - STALL_SECS - 60 }),
+    ],
+  }, NOW)
+  assert.equal(c.needsYou.length, 0)
+  assert.equal(c.working.length, 3)
+  assert.equal(c.working.find((w) => w.slot.key === 'mid').stalled, true)
+})
+
+test('loopNextFire: last fire + idle gap, created fallback, 0 when unknowable', () => {
+  assert.equal(loopNextFire(loop({ last_fire_ts: NOW - 100, idle_secs: 300 })), NOW + 200)
+  assert.equal(loopNextFire(loop({ last_fire_ts: null, created_ts: NOW - 50, idle_secs: 60 })), NOW + 10)
+  assert.equal(loopNextFire(loop({ last_fire_ts: null, created_ts: null })), 0)
+  assert.equal(loopNextFire(loop({ idle_secs: 0 })), 0)
 })

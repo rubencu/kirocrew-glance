@@ -2,17 +2,28 @@
 // Pure-UI KiroCrew app: reads existing gateway endpoints, classifies every
 // session into Needs You / Working / On a Mission / Quiet. Zero management.
 // v1.1: density-first layout — full width, card grid, 2-line tiles, quiet chips.
+// v1.2: proactive — desktop notifications, stall detection, loop near-cap
+// early warning, attention aging, NEW pills. Still zero management.
+// v1.3: act from the board — stop hung turns, resume capped loops, next-fire ETA.
 import { useState, useEffect, useRef, useCallback, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { classify, toEpoch, rel, loopKind, loopGoal } from './classify.mjs'
+import { classify, toEpoch, rel, loopKind, loopGoal, itemKey, loopNextFire } from './classify.mjs'
 
-const VERSION = '1.1.0'
+const VERSION = '1.3.1'
 const ACCENT = 'var(--accent, #7c3aed)'
 const ACCENT_TINT = 'rgba(124, 58, 237, .14)'
 const DANGER = 'var(--danger, #b91c1c)'
+const DANGER_TINT = 'rgba(185, 28, 28, .12)'
 const OK = 'var(--ok, #047857)'
 const WARN = '#b45309'
 const WARN_TINT = 'rgba(180, 83, 9, .14)'
+
+// Future-duration formatter (rel() is past-only).
+function fut(secs) {
+  if (secs < 60) return 'soon'
+  if (secs < 3600) return 'in ' + Math.floor(secs / 60) + 'm'
+  return 'in ' + Math.floor(secs / 3600) + 'h'
+}
 
 // ---------- data ----------
 
@@ -35,6 +46,65 @@ async function loadAll() {
     slots: Array.isArray(slots) ? slots : [],
     loops, questions: Array.isArray(questions) ? questions : [], approvals: appr,
   }
+}
+
+// ---------- attention freshness + notifications (localStorage-backed) ----------
+
+const SEEN_KEY = 'glance-seen-v1'       // { itemKey: firstSeenEpoch } — drives NEW pills
+const NOTIFIED_KEY = 'glance-notified-v1' // { itemKey: 1 } — desktop-notification dedup
+const NOTIFY_PREF_KEY = 'glance-notify-v1'
+const NEW_WINDOW = 300 // NEW pill shows for 5 min after an item first appears
+
+function readStore(k) {
+  try { return JSON.parse(localStorage.getItem(k) || '{}') } catch { return {} }
+}
+function writeStore(k, v) {
+  try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* private mode etc. */ }
+}
+
+// Track first-seen per attention item; returns the updated map. Items that
+// resolved are dropped so a re-appearance counts as new again. A completely
+// empty store (first ever visit) is seeded as already-seen to avoid a NEW burst.
+function trackSeen(keys, now) {
+  const seen = readStore(SEEN_KEY)
+  const empty = Object.keys(seen).length === 0
+  const next = {}
+  for (const k of keys) next[k] = k in seen ? seen[k] : (empty ? now - NEW_WINDOW - 1 : now)
+  writeStore(SEEN_KEY, next)
+  return next
+}
+
+// Fire a desktop notification once per attention item (dedup persisted).
+// Click focuses the dashboard and jumps to the session.
+function notifyNew(items, enabled, navigate) {
+  if (!enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  const notified = readStore(NOTIFIED_KEY)
+  const next = {}
+  for (const item of items) {
+    const k = itemKey(item)
+    next[k] = 1
+    if (notified[k]) continue
+    const title = item.slot ? (item.slot.title || item.slot.key) : ((item.appr && item.appr.source) || 'background')
+    const kindLabel = { question: 'has a question', approval: 'wants an approval', bgApproval: 'wants an approval', plan: 'plan awaits Go', choice: 'offers choices', capped: 'loop ran out of rope', stalled: 'looks stalled (30m+ without activity)' }[item.kind] || 'needs you'
+    const slotKey = item.slot ? item.slot.key : ''
+    try {
+      const n = new Notification('Glance — ' + title, { body: kindLabel, tag: 'glance-' + k })
+      n.onclick = () => {
+        window.focus()
+        if (slotKey && navigate) navigate('/chat?sid=' + encodeURIComponent(slotKey))
+        n.close()
+      }
+    } catch { /* notification construction can throw on some platforms */ }
+  }
+  writeStore(NOTIFIED_KEY, next) // pruned to live items — re-appearance re-notifies
+}
+
+// Waiting-time color escalation: muted < 1h ≤ amber < 4h ≤ red.
+function waitColor(waitTs, now) {
+  const d = now - (waitTs || now)
+  if (d >= 4 * 3600) return DANGER
+  if (d >= 3600) return WARN
+  return 'var(--muted)'
 }
 
 // ---------- shared bits ----------
@@ -120,17 +190,19 @@ function card(children, accent) {
   }, children)
 }
 
-function CardHeader({ item, now, navigate, label, labelBg, labelFg }) {
+function CardHeader({ item, now, navigate, label, labelBg, labelFg, fresh }) {
   const s = item.slot
+  const wc = waitColor(item.waitTs, now)
   return h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minWidth: 0 } },
     h(Pill, { bg: labelBg, fg: labelFg }, label),
+    fresh ? h(Pill, { bg: ACCENT, fg: 'var(--accent-fg, #fff)' }, 'NEW') : null,
     s ? h(SlotTitle, { slot: s, navigate }) : null,
-    h('span', { style: { marginLeft: 'auto', fontSize: 10, color: 'var(--muted)', flexShrink: 0 } },
+    h('span', { style: { marginLeft: 'auto', fontSize: 10, color: wc, fontWeight: wc === 'var(--muted)' ? 400 : 600, flexShrink: 0 } },
       rel(item.waitTs, now)),
   )
 }
 
-function QuestionCard({ item, now, navigate, onDone }) {
+function QuestionCard({ item, now, navigate, onDone, fresh }) {
   const [answers, setAnswers] = useState({})
   const [text, setText] = useState({})
   const [busy, setBusy] = useState(false)
@@ -155,9 +227,10 @@ function QuestionCard({ item, now, navigate, onDone }) {
     setAnswers(next)
     if (qs.every((q) => next[q.text])) submit(next)
   }
+  const queued = item.asks.length - 1
 
   return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: 'QUESTION', labelBg: ACCENT_TINT, labelFg: ACCENT }),
+    h(CardHeader, { key: 'h', item, now, navigate, label: 'QUESTION', labelBg: ACCENT_TINT, labelFg: ACCENT, fresh }),
     ...qs.map((q, i) => h('div', { key: i, style: { marginBottom: 4 } },
       h('div', { style: { fontSize: 12, color: 'var(--text)', marginBottom: 5, whiteSpace: 'pre-wrap' } }, q.text),
       h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
@@ -177,10 +250,12 @@ function QuestionCard({ item, now, navigate, onDone }) {
         }),
       ),
     )),
+    queued > 0 ? h('div', { key: '__queued', style: { fontSize: 10, color: 'var(--muted)', marginTop: 2 } },
+      '+' + queued + ' more question' + (queued > 1 ? 's' : '') + ' queued — appears after this one is answered') : null,
   ], ACCENT)
 }
 
-function ApprovalCard({ item, now, navigate, onDone }) {
+function ApprovalCard({ item, now, navigate, onDone, fresh }) {
   const [busy, setBusy] = useState(false)
   const s = item.slot
   const info = item.info
@@ -196,7 +271,7 @@ function ApprovalCard({ item, now, navigate, onDone }) {
     } finally { setBusy(false) }
   }
   return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: 'APPROVAL', labelBg: WARN_TINT, labelFg: WARN }),
+    h(CardHeader, { key: 'h', item, now, navigate, label: 'APPROVAL', labelBg: WARN_TINT, labelFg: WARN, fresh }),
     h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
       h('code', null, (info.tool || 'tool') + '  ' + preview.slice(0, 140))),
     h('div', { key: 'a', style: { display: 'flex', gap: 5 } },
@@ -206,9 +281,10 @@ function ApprovalCard({ item, now, navigate, onDone }) {
   ], WARN)
 }
 
-function BgApprovalCard({ item, now, onDone }) {
+function BgApprovalCard({ item, now, onDone, fresh }) {
   const [busy, setBusy] = useState(false)
   const a = item.appr
+  const wc = waitColor(item.waitTs, now)
   const act = async (action) => {
     setBusy(true)
     try {
@@ -219,8 +295,9 @@ function BgApprovalCard({ item, now, onDone }) {
   return card([
     h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 } },
       h(Pill, { bg: WARN_TINT, fg: WARN }, 'APPROVAL'),
+      fresh ? h(Pill, { bg: ACCENT, fg: 'var(--accent-fg, #fff)' }, 'NEW') : null,
       h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--text)' } }, a.source || 'background'),
-      h('span', { style: { marginLeft: 'auto', fontSize: 10, color: 'var(--muted)' } }, rel(item.waitTs, now)),
+      h('span', { style: { marginLeft: 'auto', fontSize: 10, color: wc, fontWeight: wc === 'var(--muted)' ? 400 : 600 } }, rel(item.waitTs, now)),
     ),
     h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
       h('code', null, (a.tool || '') + '  ' + String(a.tool_purpose || '').slice(0, 120))),
@@ -231,7 +308,7 @@ function BgApprovalCard({ item, now, onDone }) {
   ], WARN)
 }
 
-function ChoiceCard({ item, now, navigate, onDone, plan }) {
+function ChoiceCard({ item, now, navigate, onDone, plan, fresh }) {
   const [busy, setBusy] = useState(false)
   const s = item.slot
   const act = async (opt) => {
@@ -252,7 +329,7 @@ function ChoiceCard({ item, now, navigate, onDone, plan }) {
     } finally { setBusy(false) }
   }
   return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: plan ? 'PLAN GATE' : 'CHOICE', labelBg: ACCENT_TINT, labelFg: ACCENT }),
+    h(CardHeader, { key: 'h', item, now, navigate, label: plan ? 'PLAN GATE' : 'CHOICE', labelBg: ACCENT_TINT, labelFg: ACCENT, fresh }),
     s.prompt_preview ? h('div', { key: 'p', style: { fontSize: 11, color: 'var(--muted)', marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } },
       String(s.prompt_preview).slice(0, 200)) : null,
     h('div', { key: 'o', style: { display: 'flex', flexWrap: 'wrap', gap: 5 } },
@@ -260,14 +337,60 @@ function ChoiceCard({ item, now, navigate, onDone, plan }) {
   ], ACCENT)
 }
 
-function CappedCard({ item, now, navigate }) {
+function CappedCard({ item, now, navigate, onDone, fresh }) {
+  const [busy, setBusy] = useState(false)
   const lp = item.loop
+  const s = item.slot
+  const capDesc = lp.stopped_reason === 'cycle_cap' ? 'cycle cap (' + lp.cycle_count + ')' : 'runtime budget'
+  const resume = async () => {
+    setBusy(true)
+    try {
+      // Background message into the same slot: the agent re-arms its own loop.
+      await fetch('/api/chat?ws=1', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot: s.key,
+          message: 'Your monitoring loop stopped after hitting its ' + capDesc +
+            ' without meeting the exit condition. If the goal is still worth pursuing, re-arm the loop' +
+            ' (monitor_start, or monitor_update with a higher cap) and continue; otherwise summarize' +
+            ' where things stand and what you need from me. Goal: ' + loopGoal(lp),
+        }),
+      })
+      onDone()
+    } finally { setBusy(false) }
+  }
   return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: 'LOOP ENDED', labelBg: WARN_TINT, labelFg: WARN }),
-    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)' } },
-      (lp.stopped_reason === 'cycle_cap' ? 'Hit its cycle cap (' + lp.cycle_count + ') ' : 'Hit its runtime budget ') +
-      'without finishing: ' + loopGoal(lp)),
+    h(CardHeader, { key: 'h', item, now, navigate, label: 'LOOP ENDED', labelBg: WARN_TINT, labelFg: WARN, fresh }),
+    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6 } },
+      'Hit its ' + capDesc + ' without finishing: ' + loopGoal(lp)),
+    h('div', { key: 'a', style: { display: 'flex', gap: 5, alignItems: 'center' } },
+      h(SolidBtn, { disabled: busy, onClick: resume }, busy ? 'Resuming…' : 'Resume loop'),
+      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'asks the agent to re-arm and continue'),
+    ),
   ], WARN)
+}
+
+function StalledCard({ item, now, navigate, onDone, fresh }) {
+  const [busy, setBusy] = useState(false)
+  const s = item.slot
+  const stop = async () => {
+    setBusy(true)
+    try {
+      // Cooperative stop — same endpoint as the chat UI's Stop button.
+      await fetch('/api/chat/slots/' + encodeURIComponent(s.key) + '/stop', { method: 'POST' })
+      onDone()
+    } finally { setBusy(false) }
+  }
+  return card([
+    h(CardHeader, { key: 'h', item, now, navigate, label: 'STALLED', labelBg: DANGER_TINT, labelFg: DANGER, fresh }),
+    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6 } },
+      'Running with no activity for ' + rel(item.waitTs, now) + ' — the turn may be hung.' +
+      (s.last_message ? ' Last: ' + String(s.last_message).slice(0, 120) : '')),
+    h('div', { key: 'a', style: { display: 'flex', gap: 5, alignItems: 'center' } },
+      h(GhostBtn, { disabled: busy, danger: true, onClick: stop }, busy ? 'Stopping…' : 'Stop turn'),
+      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'cooperative stop — click title to inspect first'),
+    ),
+  ], DANGER)
 }
 
 // ---------- tiles (working / mission) ----------
@@ -285,12 +408,14 @@ function WorkTile({ item, now, navigate }) {
   const s = item.slot
   return h('div', {
     style: tileStyle(),
+    title: item.stalled ? 'No activity for ' + rel(item.lastTs, now) + ' while running — the turn may be stuck' : undefined,
     onClick: () => navigate('/chat?sid=' + encodeURIComponent(s.key)),
     onMouseEnter: (e) => tileHover(e, true), onMouseLeave: (e) => tileHover(e, false),
   },
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-      h(Dot, { color: OK, pulse: true }),
+      h(Dot, { color: item.stalled ? WARN : OK, pulse: !item.stalled }),
       ellip(s.title || s.key, { fontWeight: 600, fontSize: 12, flex: 1 }),
+      item.stalled ? h(Pill, { bg: WARN_TINT, fg: WARN }, 'stalled ' + rel(item.lastTs, now)) : null,
       s.queue_depth > 0 ? h(Pill, { bg: ACCENT_TINT, fg: ACCENT }, '+' + s.queue_depth) : null,
       h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } }, rel(item.lastTs, now)),
     ),
@@ -305,6 +430,7 @@ function MissionTile({ item, now, navigate }) {
   const { slot: s, loop: lp } = item
   const kind = loopKind(lp)
   const running = s && (s.running || s.orchestrating)
+  const nf = loopNextFire(lp)
   const title = s ? (s.title || s.key) : (kind === 'research' ? 'Research ' + lp.slot_key.slice(9, 17) : lp.slot_key)
   return h('div', {
     style: tileStyle(),
@@ -319,7 +445,10 @@ function MissionTile({ item, now, navigate }) {
     ),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginTop: 1 } },
       ellip(loopGoal(lp), { fontSize: 11, color: 'var(--muted)', flex: 1 }),
-      h(Pill, { bg: ACCENT_TINT, fg: ACCENT }, lp.cycle_count + '/' + (lp.max_cycles || '∞')),
+      !running && nf ? h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } },
+        nf > now ? fut(nf - now) : 'due') : null,
+      h(Pill, item.nearCap ? { bg: WARN_TINT, fg: WARN } : { bg: ACCENT_TINT, fg: ACCENT },
+        (item.nearCap ? '⚠ ' : '') + lp.cycle_count + '/' + (lp.max_cycles || '∞')),
     ),
   )
 }
@@ -347,18 +476,21 @@ function QuietChip({ item, now, navigate, dim }) {
 
 // ---------- board (pure presentational — exported for render tests) ----------
 
-export function Board({ c, now, navigate, onAction, showOlder, setShowOlder }) {
+export function Board({ c, now, navigate, onAction, showOlder, setShowOlder, firstSeen }) {
+  const fs = firstSeen || {}
   return h(Fragment, null,
     c.needsYou.length
       ? h(Section, { label: 'Needs you', color: ACCENT, count: c.needsYou.length, grid: CARD_GRID },
           ...c.needsYou.map((item, i) => {
             const key = item.kind + '-' + (item.slot ? item.slot.key : (item.appr ? item.appr.id : i))
-            if (item.kind === 'question') return h(QuestionCard, { key, item, now, navigate, onDone: onAction })
-            if (item.kind === 'approval') return h(ApprovalCard, { key, item, now, navigate, onDone: onAction })
-            if (item.kind === 'bgApproval') return h(BgApprovalCard, { key, item, now, onDone: onAction })
-            if (item.kind === 'plan') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: true })
-            if (item.kind === 'choice') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: false })
-            return h(CappedCard, { key, item, now, navigate })
+            const fresh = now - (fs[itemKey(item)] || 0) < NEW_WINDOW
+            if (item.kind === 'question') return h(QuestionCard, { key, item, now, navigate, onDone: onAction, fresh })
+            if (item.kind === 'approval') return h(ApprovalCard, { key, item, now, navigate, onDone: onAction, fresh })
+            if (item.kind === 'bgApproval') return h(BgApprovalCard, { key, item, now, onDone: onAction, fresh })
+            if (item.kind === 'plan') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: true, fresh })
+            if (item.kind === 'choice') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: false, fresh })
+            if (item.kind === 'stalled') return h(StalledCard, { key, item, now, navigate, onDone: onAction, fresh })
+            return h(CappedCard, { key, item, now, navigate, onDone: onAction, fresh })
           }))
       : h('div', { style: { border: '1px dashed var(--border)', borderRadius: 6, padding: '6px 12px', marginBottom: 12, fontSize: 11, color: 'var(--muted)' } },
           'Nothing needs you right now ✨'),
@@ -391,6 +523,10 @@ export default function GlanceApp() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [showOlder, setShowOlder] = useState(false)
+  const [firstSeen, setFirstSeen] = useState({})
+  const [notify, setNotify] = useState(() => {
+    try { return localStorage.getItem(NOTIFY_PREF_KEY) === '1' } catch { return false }
+  })
   const navigate = useNavigate()
   const timer = useRef(null)
 
@@ -414,9 +550,35 @@ export default function GlanceApp() {
     return () => { clearInterval(timer.current); document.removeEventListener('visibilitychange', arm) }
   }, [load])
 
+  // Track first-seen for NEW pills and fire desktop notifications on new items.
+  useEffect(() => {
+    if (!data) return
+    const nowS = Date.now() / 1000
+    const items = classify(data, nowS).needsYou
+    setFirstSeen(trackSeen(items.map(itemKey), nowS))
+    notifyNew(items, notify, navigate)
+  }, [data, notify, navigate])
+
+  const toggleNotify = useCallback(() => {
+    const next = !notify
+    if (next && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+    // Seed dedup with current items so enabling doesn't burst-notify the backlog.
+    if (next && data) {
+      const seed = {}
+      for (const item of classify(data, Date.now() / 1000).needsYou) seed[itemKey(item)] = 1
+      writeStore(NOTIFIED_KEY, seed)
+    }
+    setNotify(next)
+    try { localStorage.setItem(NOTIFY_PREF_KEY, next ? '1' : '0') } catch { /* ignore */ }
+  }, [notify, data])
+
   const now = Date.now() / 1000
   const c = data ? classify(data, now) : null
   const quietTotal = c ? c.quietToday.length + c.quietEarlier.length + c.older.length : 0
+  const stalled = c ? c.working.filter((w) => w.stalled).length : 0
+  const notifyBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied'
 
   return h('div', { style: { padding: '10px 14px', color: 'var(--text)', position: 'relative' } },
     h('style', null, '@keyframes glancePulse { 0%,100% {opacity:1; transform:scale(1)} 50% {opacity:.35; transform:scale(.8)} }'),
@@ -431,9 +593,20 @@ export default function GlanceApp() {
       c ? h('span', { style: { fontSize: 11, color: 'var(--muted)' } },
         [c.needsYou.length + ' need you', c.working.length + ' working', c.mission.length + ' on a mission', quietTotal + ' quiet'].join(' · '))
         : h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, 'loading…'),
-      h('span', { style: { marginLeft: 'auto', fontSize: 10, color: 'var(--muted)' } }, 'v' + VERSION),
+      stalled ? h(Pill, { bg: WARN_TINT, fg: WARN }, stalled + ' stalled') : null,
+      h('button', {
+        onClick: toggleNotify,
+        title: notifyBlocked
+          ? 'Browser notifications are blocked for this site — allow them in browser settings'
+          : (notify ? 'Desktop notifications ON — click to disable' : 'Notify me when something needs me'),
+        style: {
+          marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 13, lineHeight: 1, padding: '2px 4px', opacity: notify && !notifyBlocked ? 1 : 0.45,
+        },
+      }, notify && !notifyBlocked ? '🔔' : '🔕'),
+      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'v' + VERSION),
     ),
     err ? h('div', { style: { border: '1px solid ' + DANGER, borderRadius: 6, padding: '6px 10px', fontSize: 11, color: DANGER, marginBottom: 10 } }, err) : null,
-    c ? h(Board, { c, now, navigate, onAction: load, showOlder, setShowOlder }) : null,
+    c ? h(Board, { c, now, navigate, onAction: load, showOlder, setShowOlder, firstSeen }) : null,
   )
 }
