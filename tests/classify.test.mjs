@@ -251,3 +251,84 @@ test('loopNextFire: last fire + idle gap, created fallback, 0 when unknowable', 
   assert.equal(loopNextFire(loop({ last_fire_ts: null, created_ts: null })), 0)
   assert.equal(loopNextFire(loop({ idle_secs: 0 })), 0)
 })
+
+// ---------- v1.4 interaction helpers ----------
+
+import { filterClassified, flattenBoard, boardKey, sectionMap, sectionDeltas } from '../ui/classify.mjs'
+
+function busyBoard() {
+  return classify({
+    slots: [
+      slot({ key: 'q1', title: 'Deploy decision' }),
+      slot({ key: 'w1', title: 'Building the fix', running: true, last_message: 'running pytest' }),
+      slot({ key: 'm1', title: 'PR watch' }),
+      slot({ key: 'quiet1', title: 'Old chat', last_activity_ts: NOW - 2 * 3600 }),
+      slot({ key: 'ancient', title: 'Ancient thing', last_activity_ts: NOW - 30 * DAY }),
+    ],
+    loops: [loop({ id: 'lp1', slot_key: 'm1', message: 'Watch the deploy until healthy' })],
+    questions: [{ ask_id: 'ask1', slot: 'q1', ts: NOW - 60, questions: [{ question: 'Which region?', options: ['us-east-1'] }] }],
+    approvals: [{ id: 'bg1', source: 'cron:patrol', tool: 'execute_bash', tool_purpose: 'rotate logs', ts: NOW - 30 }],
+  }, NOW)
+}
+
+test('boardKey: attention items reuse itemKey, tiles key by loop/slot', () => {
+  const c = busyBoard()
+  assert.equal(boardKey(c.needsYou.find((i) => i.kind === 'question')), 'q-ask1')
+  assert.equal(boardKey(c.needsYou.find((i) => i.kind === 'bgApproval')), 'bg-bg1')
+  assert.equal(boardKey(c.working[0]), 's-w1')
+  assert.equal(boardKey(c.mission[0]), 'l-lp1')
+  assert.equal(boardKey(c.quietToday[0]), 's-quiet1')
+})
+
+test('filterClassified: matches title, last message, loop goal, question text, approval source; empty query is identity', () => {
+  const c = busyBoard()
+  assert.equal(filterClassified(c, ''), c)
+  assert.equal(filterClassified(c, '   '), c)
+  const byTitle = filterClassified(c, 'building')
+  assert.equal(byTitle.working.length, 1)
+  assert.equal(byTitle.needsYou.length, 0)
+  assert.equal(filterClassified(c, 'PYTEST').working.length, 1) // case-insensitive, last_message
+  assert.equal(filterClassified(c, 'until healthy').mission.length, 1) // loop goal
+  assert.equal(filterClassified(c, 'which region').needsYou.length, 1) // question text
+  assert.equal(filterClassified(c, 'cron:patrol').needsYou.length, 1) // approval source
+  const none = filterClassified(c, 'zzz-no-match')
+  assert.equal(none.needsYou.length + none.working.length + none.mission.length +
+    none.quietToday.length + none.quietEarlier.length + none.older.length, 0)
+})
+
+test('flattenBoard: section order, identity keys, older gated on expansion', () => {
+  const c = busyBoard()
+  const flat = flattenBoard(c, false)
+  // needsYou (question + bgApproval) → working → mission → quiet; older collapsed
+  assert.equal(flat.length, 5)
+  assert.equal(flat[0].key[0] === 'q' || flat[0].key.startsWith('bg-'), true)
+  assert.ok(flat.some((f) => f.key === 's-w1' && f.slotKey === 'w1'))
+  assert.ok(flat.some((f) => f.key === 'l-lp1' && f.slotKey === 'm1'))
+  assert.ok(!flat.some((f) => f.key === 's-ancient'))
+  const flatAll = flattenBoard(c, true)
+  assert.equal(flatAll.length, 6)
+  assert.ok(flatAll.some((f) => f.key === 's-ancient'))
+  // working comes after every needsYou item
+  const wIdx = flatAll.findIndex((f) => f.key === 's-w1')
+  const lastNeed = Math.max(flatAll.findIndex((f) => f.key === 'q-ask1'), flatAll.findIndex((f) => f.key === 'bg-bg1'))
+  assert.ok(wIdx > lastNeed)
+})
+
+test('sectionDeltas: null prev yields none; section moves and new items flagged; unchanged silent', () => {
+  const c1 = busyBoard()
+  const m1 = sectionMap(c1)
+  assert.deepEqual(sectionDeltas(null, m1), [])
+  assert.deepEqual(sectionDeltas(m1, m1), [])
+  // w1 finishes → moves working → quiet; a brand-new slot appears
+  const c2 = classify({
+    slots: [
+      slot({ key: 'w1', title: 'Building the fix', running: false, last_activity_ts: NOW - 10 }),
+      slot({ key: 'newbie', title: 'Fresh session', running: true }),
+    ],
+    loops: [], questions: [], approvals: [],
+  }, NOW)
+  const d = sectionDeltas(m1, sectionMap(c2))
+  assert.ok(d.includes('s-w1'), 'moved section')
+  assert.ok(d.includes('s-newbie'), 'new item')
+  assert.ok(!d.includes('s-quiet1'), 'departed items are not flagged')
+})

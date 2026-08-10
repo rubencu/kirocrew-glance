@@ -132,3 +132,71 @@ export function classify(data, now) {
   out.older.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0))
   return out
 }
+
+// ---------- v1.4 interaction helpers (pure — unit-tested) ----------
+
+// Stable board-wide identity for ANY item, attention or not. Attention items
+// reuse itemKey (so questions key by ask_id); tiles/chips key by loop or slot.
+export function boardKey(it) {
+  if (it.kind) return itemKey(it)
+  if (it.loop) return 'l-' + (it.loop.id || it.loop.slot_key)
+  return 's-' + it.slot.key
+}
+
+// All searchable text of a board item, lowercased.
+function itemText(it) {
+  const parts = []
+  if (it.slot) parts.push(it.slot.title || '', it.slot.key || '', it.slot.last_message || '')
+  if (it.loop) parts.push(loopGoal(it.loop), it.loop.slot_key || '')
+  if (it.appr) parts.push(it.appr.source || '', it.appr.tool || '', String(it.appr.tool_purpose || ''))
+  if (it.asks) for (const a of it.asks) for (const q of a.questions || []) parts.push(String(q.question ?? q.text ?? ''))
+  return parts.join(' ').toLowerCase()
+}
+
+// Filter every bucket of a classified board by a case-insensitive substring
+// (title, slot key, last message, loop goal, question text, approval source/tool).
+export function filterClassified(c, query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return c
+  const f = (arr) => arr.filter((it) => itemText(it).includes(q))
+  return {
+    needsYou: f(c.needsYou), working: f(c.working), mission: f(c.mission),
+    quietToday: f(c.quietToday), quietEarlier: f(c.quietEarlier), older: f(c.older),
+  }
+}
+
+// Ordered navigable list (needsYou → working → mission → quiet, older only when
+// expanded) with stable identity keys — drives j/k keyboard selection. Keyed by
+// identity, not index, so the selection follows its item across re-sorts.
+export function flattenBoard(c, showOlder) {
+  const out = []
+  const add = (it) => out.push({ key: boardKey(it), slotKey: it.slot ? it.slot.key : '' })
+  for (const it of c.needsYou) add(it)
+  for (const it of c.working) add(it)
+  for (const it of c.mission) add(it)
+  for (const it of c.quietToday) add(it)
+  for (const it of c.quietEarlier) add(it)
+  if (showOlder) for (const it of c.older) add(it)
+  return out
+}
+
+// key → section snapshot, the input for delta detection between polls.
+export function sectionMap(c) {
+  const m = {}
+  for (const it of c.needsYou) m[boardKey(it)] = 'needs'
+  for (const it of c.working) m[boardKey(it)] = 'working'
+  for (const it of c.mission) m[boardKey(it)] = 'mission'
+  for (const it of c.quietToday) m[boardKey(it)] = 'quiet'
+  for (const it of c.quietEarlier) m[boardKey(it)] = 'quiet'
+  for (const it of c.older) m[boardKey(it)] = 'older'
+  return m
+}
+
+// Keys that entered the board or moved section since the previous snapshot.
+// First snapshot (prev == null) yields no deltas — page load isn't a change.
+export function sectionDeltas(prev, next) {
+  if (!prev) return []
+  const out = []
+  for (const k of Object.keys(next)) if (prev[k] !== next[k]) out.push(k)
+  return out
+}

@@ -10,7 +10,7 @@
 // fill, question-card compression, surfaced action failures, memoized classify.
 import { useState, useEffect, useRef, useCallback, useMemo, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { classify, toEpoch, rel, loopKind, loopGoal, itemKey, loopNextFire } from './classify.mjs'
+import { classify, toEpoch, rel, loopKind, loopGoal, itemKey, loopNextFire, filterClassified, flattenBoard, sectionMap, sectionDeltas, boardKey } from './classify.mjs'
 
 const VERSION = '1.4.0'
 const ACCENT = 'var(--accent, #7c3aed)'
@@ -236,6 +236,7 @@ function card(children, accent) {
     style: {
       background: 'var(--card, var(--bg))', border: '1px solid var(--border)',
       borderLeft: `3px solid ${accent}`, borderRadius: 6, padding: '9px 11px', minWidth: 0,
+      height: '100%', boxSizing: 'border-box',
     },
   }, children)
 }
@@ -428,6 +429,7 @@ function tileStyle() {
   return {
     border: '1px solid var(--border)', borderRadius: 6, padding: '5px 9px',
     cursor: 'pointer', minWidth: 0, background: 'var(--card, var(--bg))',
+    height: '100%', boxSizing: 'border-box',
   }
 }
 
@@ -506,37 +508,59 @@ function QuietChip({ item, now, navigate, dim }) {
 
 // ---------- board (pure presentational — exported for render tests) ----------
 
-export function Board({ c, now, navigate, onAction, showOlder, setShowOlder, firstSeen }) {
+// Wrapper for every board item: carries the identity key for keyboard
+// selection (data-glkey), the selection outline, and the section-change flash.
+function Wrap({ k, selKey, deltas, now, inline, children }) {
+  const flash = now - ((deltas && deltas[k]) || 0) < 10
+  const selected = k === selKey
+  return h(inline ? 'span' : 'div', {
+    'data-glkey': k,
+    style: {
+      minWidth: 0, borderRadius: 8,
+      ...(inline ? { display: 'inline-flex' } : {}),
+      outline: selected ? '2px solid ' + AIM : 'none', outlineOffset: 1,
+      animation: flash ? 'glanceFlash 8s ease-out' : 'none',
+    },
+  }, children)
+}
+
+export function Board({ c, now, navigate, onAction, showOlder, setShowOlder, firstSeen, selKey, deltas, emptyLabel }) {
   const fs = firstSeen || {}
   const total = c.needsYou.length + c.working.length + c.mission.length +
     c.quietToday.length + c.quietEarlier.length + c.older.length
   if (!total) {
     return h('div', { style: { border: '1px dashed var(--border)', borderRadius: 6, padding: '10px 14px', fontSize: 12, color: 'var(--muted)' } },
-      'No sessions yet — the board fills in as agents pick up work.')
+      emptyLabel || 'No sessions yet — the board fills in as agents pick up work.')
+  }
+  const wrap = (item, child, inline) => {
+    const k = boardKey(item)
+    return h(Wrap, { key: k, k, selKey, deltas, now, inline }, child)
   }
   return h(Fragment, null,
     h(Section, { id: 'glance-sec-needs', label: 'Needs you', color: AIM, count: c.needsYou.length, grid: CARD_GRID },
       ...c.needsYou.map((item) => {
         const key = itemKey(item) // identity key — a NEW question on the same slot must not inherit typed state
         const fresh = now - (fs[key] || 0) < NEW_WINDOW
-        if (item.kind === 'question') return h(QuestionCard, { key, item, now, navigate, onDone: onAction, fresh })
-        if (item.kind === 'approval') return h(ApprovalCard, { key, item, now, navigate, onDone: onAction, fresh })
-        if (item.kind === 'bgApproval') return h(BgApprovalCard, { key, item, now, onDone: onAction, fresh })
-        if (item.kind === 'plan') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: true, fresh })
-        if (item.kind === 'choice') return h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: false, fresh })
-        if (item.kind === 'stalled') return h(StalledCard, { key, item, now, navigate, onDone: onAction, fresh })
-        return h(CappedCard, { key, item, now, navigate, onDone: onAction, fresh })
+        let el
+        if (item.kind === 'question') el = h(QuestionCard, { key, item, now, navigate, onDone: onAction, fresh })
+        else if (item.kind === 'approval') el = h(ApprovalCard, { key, item, now, navigate, onDone: onAction, fresh })
+        else if (item.kind === 'bgApproval') el = h(BgApprovalCard, { key, item, now, onDone: onAction, fresh })
+        else if (item.kind === 'plan') el = h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: true, fresh })
+        else if (item.kind === 'choice') el = h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: false, fresh })
+        else if (item.kind === 'stalled') el = h(StalledCard, { key, item, now, navigate, onDone: onAction, fresh })
+        else el = h(CappedCard, { key, item, now, navigate, onDone: onAction, fresh })
+        return wrap(item, el)
       })),
     h(Section, { id: 'glance-sec-working', label: 'Working', color: OK, count: c.working.length, grid: TILE_GRID },
-      ...c.working.map((item) => h(WorkTile, { key: item.slot.key, item, now, navigate }))),
+      ...c.working.map((item) => wrap(item, h(WorkTile, { item, now, navigate })))),
     h(Section, { id: 'glance-sec-mission', label: 'On a mission', color: 'var(--text)', count: c.mission.length, grid: TILE_GRID },
-      ...c.mission.map((item, i) => h(MissionTile, { key: item.loop.id || i, item, now, navigate }))),
+      ...c.mission.map((item) => wrap(item, h(MissionTile, { item, now, navigate })))),
     h(Section, {
       id: 'glance-sec-quiet', label: 'Quiet', color: 'var(--muted)',
       count: c.quietToday.length + c.quietEarlier.length + c.older.length, grid: CHIP_FLOW,
     },
-      ...c.quietToday.map((item) => h(QuietChip, { key: item.slot.key, item, now, navigate })),
-      ...c.quietEarlier.map((item) => h(QuietChip, { key: item.slot.key, item, now, navigate, dim: true })),
+      ...c.quietToday.map((item) => wrap(item, h(QuietChip, { item, now, navigate }), true)),
+      ...c.quietEarlier.map((item) => wrap(item, h(QuietChip, { item, now, navigate, dim: true }), true)),
       c.older.length ? h('span', {
         key: '__older',
         onClick: () => setShowOlder(!showOlder),
@@ -545,7 +569,7 @@ export function Board({ c, now, navigate, onAction, showOlder, setShowOlder, fir
           fontSize: 11, color: 'var(--muted)', cursor: 'pointer', lineHeight: '18px',
         },
       }, (showOlder ? '▾' : '▸') + ' ' + c.older.length + ' older') : null,
-      showOlder ? c.older.map((item) => h(QuietChip, { key: item.slot.key, item, now, navigate, dim: true })) : null,
+      showOlder ? c.older.map((item) => wrap(item, h(QuietChip, { item, now, navigate, dim: true }), true)) : null,
     ),
   )
 }
@@ -561,9 +585,14 @@ export default function GlanceApp() {
   const [notify, setNotify] = useState(() => {
     try { return localStorage.getItem(NOTIFY_PREF_KEY) === '1' } catch { return false }
   })
+  const [filter, setFilter] = useState('')
+  const [selKey, setSelKey] = useState('')
+  const [deltas, setDeltas] = useState({})
   const navigate = useNavigate()
   const timer = useRef(null)
   const lastRaw = useRef('')
+  const searchRef = useRef(null)
+  const prevSecRef = useRef(null)
 
   const load = useCallback(async () => {
     try {
@@ -614,6 +643,77 @@ export default function GlanceApp() {
     notifyNew(items, notify, navigate)
   }, [view, notify, navigate])
 
+  // Section-change deltas: flash items that entered the board or moved buckets
+  // since the previous poll (page load itself is not a change).
+  useEffect(() => {
+    if (!view) return
+    const secs = sectionMap(view.c)
+    const changed = sectionDeltas(prevSecRef.current, secs)
+    prevSecRef.current = secs
+    if (changed.length) {
+      setDeltas((d) => {
+        const nd = {}
+        for (const k of Object.keys(d)) if (view.now - d[k] < 60) nd[k] = d[k] // prune stale entries
+        for (const k of changed) nd[k] = view.now
+        return nd
+      })
+    }
+  }, [view])
+
+  // Tab badge (DESIGN.md promise): needs-you count in the document title while
+  // Glance is mounted; the original title is restored on unmount.
+  useEffect(() => {
+    const orig = document.title
+    return () => { document.title = orig }
+  }, [])
+  useEffect(() => {
+    const n = view ? view.c.needsYou.length : 0
+    document.title = (n ? '(' + n + ') ' : '') + 'Glance'
+  }, [view])
+
+  // Board view: the filter narrows what's shown; header counts stay global.
+  const shown = useMemo(() => (view ? filterClassified(view.c, filter) : null), [view, filter])
+  const flat = useMemo(() => (shown ? flattenBoard(shown, showOlder) : []), [shown, showOlder])
+
+  // Keyboard: j/k move the selection, Enter opens the session, / focuses the
+  // filter, Escape clears the selection. Suppressed while typing in inputs.
+  useEffect(() => {
+    const onKey = (e) => {
+      const t = e.target
+      const inInput = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      if (e.key === '/' && !inInput) {
+        e.preventDefault()
+        if (searchRef.current) searchRef.current.focus()
+        return
+      }
+      if (inInput || e.altKey || e.ctrlKey || e.metaKey) return
+      if (e.key === 'j' || e.key === 'k') {
+        if (!flat.length) return
+        const i = flat.findIndex((f) => f.key === selKey)
+        const n = e.key === 'j' ? Math.min(i + 1, flat.length - 1) : Math.max(i < 0 ? 0 : i - 1, 0)
+        setSelKey(flat[n].key)
+      } else if (e.key === 'Enter' && selKey) {
+        const f = flat.find((x) => x.key === selKey)
+        if (f && f.slotKey) navigate('/chat?sid=' + encodeURIComponent(f.slotKey))
+      } else if (e.key === 'Escape' && selKey) {
+        setSelKey('')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [flat, selKey, navigate])
+
+  // Selection follows its item by identity; clear it when the item leaves the
+  // board, and keep the selected element scrolled into view.
+  useEffect(() => {
+    if (selKey && !flat.some((f) => f.key === selKey)) setSelKey('')
+  }, [flat, selKey])
+  useEffect(() => {
+    if (!selKey || typeof CSS === 'undefined') return
+    const el = document.querySelector('[data-glkey="' + CSS.escape(selKey) + '"]')
+    if (el) el.scrollIntoView({ block: 'nearest' })
+  }, [selKey])
+
   const toggleNotify = useCallback(() => {
     const next = !notify
     if (next && typeof Notification !== 'undefined' && Notification.permission === 'default') {
@@ -642,7 +742,7 @@ export default function GlanceApp() {
   }, txt)
 
   return h('div', { style: { padding: '0 14px 10px', color: 'var(--text)', position: 'relative' } },
-    h('style', null, '@keyframes glancePulse { 0%,100% {opacity:1; transform:scale(1)} 50% {opacity:.35; transform:scale(.8)} }'),
+    h('style', null, '@keyframes glancePulse { 0%,100% {opacity:1; transform:scale(1)} 50% {opacity:.35; transform:scale(.8)} } @keyframes glanceFlash { from { box-shadow: 0 0 0 2px rgba(139, 92, 246, .45) } to { box-shadow: 0 0 0 2px rgba(139, 92, 246, 0) } }'),
     // Sticky summary strip: the counts stay visible however far the board scrolls;
     // each count jumps to its section.
     h('div', { style: { position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0 6px', marginBottom: 6 } },
@@ -662,19 +762,35 @@ export default function GlanceApp() {
         ' · ', seg(quietTotal + ' quiet', 'glance-sec-quiet'),
       ) : h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, 'loading…'),
       stalled ? h(Pill, { bg: WARN_TINT, fg: WARN }, stalled + ' stalled') : null,
+      h('input', {
+        ref: searchRef,
+        value: filter,
+        placeholder: 'filter  ( / )',
+        'aria-label': 'Filter sessions',
+        onChange: (e) => setFilter(e.target.value),
+        onKeyDown: (e) => { if (e.key === 'Escape') { setFilter(''); e.currentTarget.blur() } },
+        style: {
+          marginLeft: 'auto', background: 'var(--card, var(--bg))', color: 'var(--text)',
+          border: '1px solid var(--border)', borderRadius: 9999, padding: '2px 10px',
+          fontSize: 11, width: 130, outline: 'none',
+        },
+      }),
       h('button', {
         onClick: toggleNotify,
         title: notifyBlocked
           ? 'Browser notifications are blocked for this site — allow them in browser settings'
           : (notify ? 'Desktop notifications ON — click to disable' : 'Notify me when something needs me'),
         style: {
-          marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer',
+          background: 'none', border: 'none', cursor: 'pointer',
           fontSize: 13, lineHeight: 1, padding: '2px 4px', opacity: notify && !notifyBlocked ? 1 : 0.45,
         },
       }, notify && !notifyBlocked ? '🔔' : '🔕'),
       h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'v' + VERSION),
     ),
     err ? h('div', { style: { border: '1px solid ' + DANGER, borderRadius: 6, padding: '6px 10px', fontSize: 11, color: DANGER, marginBottom: 10 } }, err) : null,
-    c ? h(Board, { c, now, navigate, onAction: load, showOlder, setShowOlder, firstSeen }) : null,
+    shown ? h(Board, {
+      c: shown, now, navigate, onAction: load, showOlder, setShowOlder, firstSeen, selKey, deltas,
+      emptyLabel: filter.trim() ? 'No matches for "' + filter.trim() + '"' : undefined,
+    }) : null,
   )
 }
