@@ -38,7 +38,7 @@ const blockers = extractBlockers({
   approvals: [
     { id: 'bg1', source: 'cron:log-patrol', tool: 'execute_bash', tool_purpose: 'rotate logs', ts: NOW - 50 },
   ],
-})
+}, NOW)
 assert.equal(blockers.length, 5, 'question, approval, plan, choice, bgApproval')
 
 const noop = () => {}

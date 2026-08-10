@@ -384,7 +384,7 @@ export default function GlanceApp() {
     await toAgent(REFRESH_MSG, CURATOR_SLOT)
   })
 
-  const blockers = live ? extractBlockers(live) : []
+  const blockers = live ? extractBlockers(live, now) : []
 
   return h('div', { style: { padding: '14px 18px', maxWidth: 980, margin: '0 auto', fontFamily: 'inherit' } },
     h('style', null, '@keyframes glancePulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }'),

@@ -182,6 +182,23 @@ test('background approvals surface with stable keys', () => {
   assert.equal(blockerKey(out[0]), 'bga-bg1')
 })
 
+test('option gates older than 48h are dropped; questions/approvals never age out', () => {
+  const out = extractBlockers({
+    slots: [
+      slot({ key: 'stale-choice', has_options: true, options: ['A'], last_activity_ts: NOW - 3 * 86400 }),
+      slot({ key: 'fresh-choice', has_options: true, options: ['B'], last_activity_ts: NOW - 3600 }),
+      slot({ key: 'old-approval', pending_approval: true, last_activity_ts: NOW - 5 * 86400 }),
+    ],
+    questions: [{ ask_id: 'a1', slot: 'nq', ts: NOW - 5 * 86400, questions: [] }],
+    approvals: [],
+  }, NOW)
+  const kinds = out.map((b) => b.kind + ':' + (b.slot ? b.slot.key : b.asks[0].ask_id))
+  assert.ok(!kinds.includes('choice:stale-choice'), 'stale option trailer dropped')
+  assert.ok(kinds.includes('choice:fresh-choice'))
+  assert.ok(kinds.includes('approval:old-approval'), 'approvals never age out')
+  assert.ok(kinds.includes('question:a1'), 'questions never age out')
+})
+
 test('mixed board sorts longest-waiting first across kinds', () => {
   const out = extractBlockers({
     slots: [slot({ key: 'ap', pending_approval: true, last_activity_ts: NOW - 100 })],

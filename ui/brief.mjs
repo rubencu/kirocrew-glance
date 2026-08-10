@@ -77,9 +77,15 @@ export function parseBrief(raw, now) {
 // ---------- live blockers (must never be stale → derived client-side) ----------
 
 // Map raw API state to interactive blocker items. 1:1 mapping only — no
-// urgency judgment here; that is the curator's job.
+// urgency judgment here; that is the curator's job. One exception: option
+// gates (choice/plan) older than 48h are dropped — sessions keep their last
+// [OPTIONS] trailer forever, so without a recency gate every stale multi-day
+// session floods the board. Questions and approvals are never gated: they
+// block a live turn regardless of age.
 // Returns [{ kind, waitTs, slot?, asks?, info?, appr?, plan? }] oldest-first.
-export function extractBlockers({ slots = [], questions = [], approvals = [] }) {
+export const OPTIONS_FRESH_SECS = 48 * 3600
+
+export function extractBlockers({ slots = [], questions = [], approvals = [] }, now) {
   const byKey = new Map(slots.map((s) => [s.key, s]))
   const hidden = (s) => Boolean(s && s.app) // app-owned plumbing slots
   const out = []
@@ -102,7 +108,9 @@ export function extractBlockers({ slots = [], questions = [], approvals = [] }) 
     if (s.pending_approval) {
       out.push({ kind: 'approval', slot: s, info: s.pending_approval_info || {}, waitTs: toEpoch(s.last_activity_ts) })
     } else if (s.has_options && Array.isArray(s.options) && s.options.length) {
-      out.push({ kind: 'choice', slot: s, plan: s.mode === 'orchestrator', waitTs: toEpoch(s.last_activity_ts) })
+      const waitTs = toEpoch(s.last_activity_ts)
+      if (typeof now === 'number' && now - waitTs > OPTIONS_FRESH_SECS) continue // stale trailer, not a live gate
+      out.push({ kind: 'choice', slot: s, plan: s.mode === 'orchestrator', waitTs })
     }
   }
 

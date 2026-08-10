@@ -9,7 +9,6 @@
     "api": [
       "/api/chat/slots",
       "/api/autonudge",
-      "/api/ask-question/pending",
       "/api/approvals"
     ]
   },

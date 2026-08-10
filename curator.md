@@ -17,13 +17,16 @@ SECRET=$(cat ~/.kiro/crew/apps/glance/.app_secret)
 TOKEN=$(curl -sf -X POST "$BASE/api/apps/glance/token" -H "X-App-Secret: $SECRET" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 ```
 
-Fetch the four state endpoints with `Authorization: Bearer $TOKEN` (if that
-returns 401, retry with `?token=$TOKEN` as a query parameter):
+Fetch the three state endpoints by appending `?token=$TOKEN` to each URL (the
+gateway accepts app tokens as a query parameter, not as a Bearer header):
 
 - `GET /api/chat/slots` — every session: title, running, pending_approval, has_options/options, queue_depth, last_activity_ts, last_message, app tag
 - `GET /api/autonudge` — active/stopped loops: goal message, cycle_count, max_cycles, stopped_reason
-- `GET /api/ask-question/pending` — pending question cards
 - `GET /api/approvals` — pending background approvals
+
+(Pending questions are deliberately NOT readable by app tokens — the gateway
+denies `/api/ask-question/*` to apps as an anti-phishing measure. Count
+blocked sessions from slot state instead; the UI shows question cards live.)
 
 If the gateway is unreachable or the token cannot be minted, **leave the
 existing brief untouched and stop** — a stale brief beats a wrong one.
