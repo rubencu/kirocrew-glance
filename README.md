@@ -1,33 +1,39 @@
 # Glance
 
-Auto-triaged session board for KiroCrew. One page that answers, at a glance:
+**The agent reads, you glance.** A KiroCrew app that replaces session-board
+scanning with an agent-curated brief.
 
-- **Needs you** — sessions blocked on a question, tool approval, plan gate, or
-  choice. Rich cards quote the actual pending ask and let you answer inline
-  without opening the session. Loops that hit their cycle/runtime cap without
-  finishing surface here too. Sorted longest-waiting first.
-- **Working** — turns running right now, with live activity previews.
-- **On a mission** — sessions driven by an autonudge loop (babysit monitors 👁,
-  goal loops 🎯, research campaigns 🔬) with the goal text and cycle N/M.
-- **Quiet** — everything else, decaying automatically: today → earlier →
-  collapsed "N older sessions". No folders, no tags, no archiving. Ever.
+An LLM curator cron triages everything in flight on your KiroCrew host every
+15 minutes and writes a short prioritized brief — what needs you *now*, what
+needs you *soon*, what resolved while you were away — each item with one
+suggested action. The UI is a single screen:
 
-Pure-UI app: reads the gateway's existing endpoints (`/api/chat/slots`,
-`/api/autonudge`, `/api/ask-question/pending`, `/api/approvals`); classification
-happens client-side in `ui/classify.mjs` (unit-tested, React-free). No Python
-backend, no crons, no stored state — the board is a stateless projection of
-live gateway state.
+1. **Live blockers** — pending questions, approvals, and plan gates, polled
+   directly and answerable inline (these must never be stale).
+2. **The brief** — the curator's judgment in plain language. One click
+   delegates any item back to an agent.
+3. **One text line** — tell the agent anything; it lands in a background
+   session.
+
+No sections to scan, no filters, no keyboard nav — v2 deleted the ~400 lines
+of client-side heuristics that approximated judgment, because the curator has
+the real thing. See `DESIGN.md` for the paradigm and architecture.
 
 ## Install
 
 ```bash
-kirocrew app install /path/to/glance-app
+git clone https://github.com/rubencu/kirocrew-glance
+kirocrew app install ./kirocrew-glance
+kirocrew config set agent.apps_trusted '["glance"]'
 kirocrew app enable glance
 ```
 
-## Develop
+Open the dashboard → Glance. The curator cron registers with the app; hit
+"Write the first brief" instead of waiting for the first 15-minute tick.
+
+## Tests
 
 ```bash
-kirocrew app dev glance          # hot-reload UI serving
-node --test tests/               # classifier unit tests (Node 20+)
+node --test tests/            # pure-logic unit tests
+bash tests/run-render-test.sh # SSR render smoke (self-skips without a React host)
 ```

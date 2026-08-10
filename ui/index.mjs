@@ -1,38 +1,36 @@
-// Glance — auto-triaged session board.
-// Pure-UI KiroCrew app: reads existing gateway endpoints, classifies every
-// session into Needs You / Working / On a Mission / Quiet. Zero management.
-// v1.1: density-first layout — full width, card grid, 2-line tiles, quiet chips.
-// v1.2: proactive — desktop notifications, stall detection, loop near-cap
-// early warning, attention aging, NEW pills. Still zero management.
-// v1.3: act from the board — stop hung turns, resume capped loops, next-fire ETA.
-// v1.4: urgency hierarchy — attention colors decoupled from the theme accent,
-// wait-age escalates cards (pill + border), equal-height cards, wide-viewport
-// fill, question-card compression, surfaced action failures, memoized classify.
-import { useState, useEffect, useRef, useCallback, useMemo, createElement as h, Fragment } from 'react'
+// Glance v2 — the brief. Simple, agentic.
+//
+// The old paradigm (v1.x) computed a board in the browser: ~400 lines of
+// classification heuristics approximating judgment. The new paradigm moves
+// judgment to an agent: a curator cron (see ../curator.md) reads gateway
+// state and writes a short prioritized brief; this UI just renders it.
+//
+// Three parts, nothing else:
+//   1. Live blockers — questions/approvals/option gates, polled directly
+//      (an answer box must never be stale).
+//   2. The brief — the curator's natural-language triage, with one suggested
+//      action per item, delegated back to an agent with one click.
+//   3. One free-text line to the agent.
+import { useState, useEffect, useRef, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { classify, toEpoch, rel, loopKind, loopGoal, itemKey, loopNextFire, filterClassified, flattenBoard, sectionMap, sectionDeltas, boardKey } from './classify.mjs'
+import { parseBrief, extractBlockers, blockerKey, rel } from './brief.mjs'
 
-const VERSION = '1.4.0'
+const VERSION = '2.0.0'
+const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
+const HANDLER_SLOT = 'glance-handler'
+const CURATOR_SLOT = 'glance-curator'
+const REFRESH_MSG = 'You are the Glance curator. Follow the procedure in ~/.kiro/crew/apps/glance/curator.md exactly, then stop. Do not do any other work.'
+
+// Urgency hues deliberately NOT the theme accent (a green accent would make
+// "act on me" read as "healthy"). Violet = interactive, red/amber = priority.
 const ACCENT = 'var(--accent, #7c3aed)'
 const ACCENT_TINT = 'rgba(124, 58, 237, .14)'
-// Urgency hue for "Needs you" — deliberately NOT the theme accent. With a green
-// accent theme, accent-colored attention cards read "healthy" and disappear
-// next to the Working section; a fixed violet keeps "act on me" distinct on
-// every theme, and green stays reserved for health.
 const AIM = '#8b5cf6'
 const AIM_TINT = 'rgba(139, 92, 246, .16)'
 const DANGER = 'var(--danger, #b91c1c)'
-const DANGER_TINT = 'rgba(185, 28, 28, .12)'
-const OK = 'var(--ok, #047857)'
 const WARN = '#b45309'
-const WARN_TINT = 'rgba(180, 83, 9, .14)'
-
-// Future-duration formatter (rel() is past-only).
-function fut(secs) {
-  if (secs < 60) return 'soon'
-  if (secs < 3600) return 'in ' + Math.floor(secs / 60) + 'm'
-  return 'in ' + Math.floor(secs / 3600) + 'h'
-}
+const MUTED = 'var(--muted)'
+const PRIORITY_DOT = { now: DANGER, soon: WARN, fyi: 'var(--border)' }
 
 // ---------- data ----------
 
@@ -40,21 +38,6 @@ async function fetchJson(url) {
   const r = await fetch(url)
   if (!r.ok) throw new Error(url + ' → ' + r.status)
   return r.json()
-}
-
-async function loadAll() {
-  const [slots, nudge, questions, approvals] = await Promise.all([
-    fetchJson('/api/chat/slots'),
-    fetchJson('/api/autonudge').catch(() => ({ loops: [] })),
-    fetchJson('/api/ask-question/pending').catch(() => []),
-    fetchJson('/api/approvals').catch(() => []),
-  ])
-  const loops = Array.isArray(nudge) ? nudge : (nudge.loops || [])
-  const appr = Array.isArray(approvals) ? approvals : (approvals.approvals || approvals.pending || [])
-  return {
-    slots: Array.isArray(slots) ? slots : [],
-    loops, questions: Array.isArray(questions) ? questions : [], approvals: appr,
-  }
 }
 
 async function post(url, body) {
@@ -66,9 +49,37 @@ async function post(url, body) {
   return r
 }
 
-// Shared action state: busy flag + surfaced failure. Actions must never fail
-// silently — a failed Approve that looks like success reads as a board glitch
-// when the card resurrects on the next poll.
+async function loadLive() {
+  const [slots, questions, approvals] = await Promise.all([
+    fetchJson('/api/chat/slots').catch(() => []),
+    fetchJson('/api/ask-question/pending').catch(() => []),
+    fetchJson('/api/approvals').catch(() => []),
+  ])
+  const appr = Array.isArray(approvals) ? approvals : (approvals.approvals || approvals.pending || [])
+  return {
+    slots: Array.isArray(slots) ? slots : [],
+    questions: Array.isArray(questions) ? questions : [],
+    approvals: appr,
+  }
+}
+
+async function loadBrief(now) {
+  try {
+    const r = await fetch('/api/file-read?path=' + encodeURIComponent(BRIEF_PATH))
+    if (!r.ok) return null // no brief yet (or unreadable) → first-run state
+    const parsed = parseBrief(await r.text(), now)
+    return parsed.ok ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// Hand a message to the agent in a named background slot (fire-and-forget).
+function toAgent(message, slot) {
+  return post('/api/chat?ws=1', { message, slot })
+}
+
+// Busy flag + surfaced failure — actions must never fail silently.
 function useAction(fn) {
   const [busy, setBusy] = useState(false)
   const [fail, setFail] = useState('')
@@ -80,89 +91,11 @@ function useAction(fn) {
   return [run, busy, fail]
 }
 
+// ---------- primitives ----------
+
 function FailNote({ fail }) {
   if (!fail) return null
   return h('div', { style: { fontSize: 10, color: DANGER, marginTop: 4 } }, '⚠ action failed: ' + fail)
-}
-
-// ---------- attention freshness + notifications (localStorage-backed) ----------
-
-const SEEN_KEY = 'glance-seen-v1'       // { itemKey: firstSeenEpoch } — drives NEW pills
-const NOTIFIED_KEY = 'glance-notified-v1' // { itemKey: 1 } — desktop-notification dedup
-const NOTIFY_PREF_KEY = 'glance-notify-v1'
-const NEW_WINDOW = 300 // NEW pill shows for 5 min after an item first appears
-
-function readStore(k) {
-  try { return JSON.parse(localStorage.getItem(k) || '{}') } catch { return {} }
-}
-function writeStore(k, v) {
-  try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* private mode etc. */ }
-}
-
-function sameMap(a, b) {
-  const ka = Object.keys(a)
-  if (ka.length !== Object.keys(b).length) return false
-  for (const k of ka) if (a[k] !== b[k]) return false
-  return true
-}
-
-// Track first-seen per attention item; returns the updated map. Items that
-// resolved are dropped so a re-appearance counts as new again. A completely
-// empty store (first ever visit) is seeded as already-seen to avoid a NEW burst.
-function trackSeen(keys, now) {
-  const seen = readStore(SEEN_KEY)
-  const empty = Object.keys(seen).length === 0
-  const next = {}
-  for (const k of keys) next[k] = k in seen ? seen[k] : (empty ? now - NEW_WINDOW - 1 : now)
-  if (!sameMap(seen, next)) writeStore(SEEN_KEY, next) // most polls change nothing
-  return next
-}
-
-// Fire a desktop notification once per attention item (dedup persisted).
-// Click focuses the dashboard and jumps to the session.
-function notifyNew(items, enabled, navigate) {
-  if (!enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
-  const notified = readStore(NOTIFIED_KEY)
-  const next = {}
-  for (const item of items) {
-    const k = itemKey(item)
-    next[k] = 1
-    if (notified[k]) continue
-    const title = item.slot ? (item.slot.title || item.slot.key) : ((item.appr && item.appr.source) || 'background')
-    const kindLabel = { question: 'has a question', approval: 'wants an approval', bgApproval: 'wants an approval', plan: 'plan awaits Go', choice: 'offers choices', capped: 'loop ran out of rope', stalled: 'looks stalled (30m+ without activity)' }[item.kind] || 'needs you'
-    const slotKey = item.slot ? item.slot.key : ''
-    try {
-      const n = new Notification('Glance — ' + title, { body: kindLabel, tag: 'glance-' + k })
-      n.onclick = () => {
-        window.focus()
-        if (slotKey && navigate) navigate('/chat?sid=' + encodeURIComponent(slotKey))
-        n.close()
-      }
-    } catch { /* notification construction can throw on some platforms */ }
-  }
-  if (!sameMap(notified, next)) writeStore(NOTIFIED_KEY, next) // pruned to live items — re-appearance re-notifies
-}
-
-// Wait-age escalation for attention cards. The pill and left border shift from
-// the kind's base color to amber (≥1h) then red (≥4h), and the wait-age joins
-// the label text — the board's most important fact rendered big, not as a
-// 10px corner footnote. Never downgrades a card whose base is already hotter.
-function urgency(item, now, base, baseTint) {
-  const d = now - (item.waitTs || now)
-  if (base !== DANGER && d >= 4 * 3600) return { color: DANGER, tint: DANGER_TINT, hot: true }
-  if (base !== DANGER && base !== WARN && d >= 3600) return { color: WARN, tint: WARN_TINT, hot: true }
-  return { color: base, tint: baseTint, hot: d >= 3600 }
-}
-
-// ---------- shared bits ----------
-
-function Dot({ color, pulse }) {
-  return h('span', {
-    style: {
-      display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color,
-      flexShrink: 0, animation: pulse ? 'glancePulse 1.6s ease-in-out infinite' : 'none',
-    },
-  })
 }
 
 function Pill({ bg, fg, children }) {
@@ -178,7 +111,7 @@ function GhostBtn({ onClick, disabled, children, danger }) {
   return h('button', {
     onClick, disabled,
     style: {
-      background: 'transparent', color: disabled ? 'var(--muted)' : (danger ? DANGER : ACCENT),
+      background: 'transparent', color: disabled ? MUTED : (danger ? DANGER : ACCENT),
       border: `1px solid ${danger ? DANGER : ACCENT_TINT}`, padding: '3px 11px', borderRadius: 9999,
       fontSize: 11, fontWeight: 500, cursor: disabled ? 'default' : 'pointer', whiteSpace: 'nowrap',
     },
@@ -189,139 +122,83 @@ function SolidBtn({ onClick, disabled, children }) {
   return h('button', {
     onClick, disabled,
     style: {
-      background: disabled ? 'var(--border)' : ACCENT, color: disabled ? 'var(--muted)' : 'var(--accent-fg, #fff)',
+      background: disabled ? 'var(--border)' : ACCENT, color: disabled ? MUTED : 'var(--accent-fg, #fff)',
       border: 'none', padding: '3px 13px', borderRadius: 9999,
       fontSize: 11, fontWeight: 500, cursor: disabled ? 'default' : 'pointer', whiteSpace: 'nowrap',
     },
   }, children)
 }
 
-function SlotTitle({ slot, navigate }) {
+function SlotLink({ slotKey, title, navigate }) {
+  if (!slotKey) return null
   return h('span', {
-    onClick: (e) => { e.stopPropagation(); navigate('/chat?sid=' + encodeURIComponent(slot.key)) },
-    title: slot.title || slot.key,
-    style: {
-      fontWeight: 600, fontSize: 12, color: 'var(--text)', cursor: 'pointer',
-      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    },
-  }, slot.title || slot.key)
+    onClick: () => navigate('/chat?sid=' + encodeURIComponent(slotKey)),
+    title: title || slotKey,
+    style: { fontWeight: 600, fontSize: 12, color: 'var(--text)', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  }, title || slotKey)
 }
-
-function ellip(txt, style) {
-  return h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...style } }, txt)
-}
-
-function Section({ id, label, color, count, grid, children }) {
-  if (!count) return null
-  return h('div', { id, style: { marginBottom: 9 } },
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 } },
-      h('span', { style: { fontSize: 12, fontWeight: 600, color } }, label),
-      h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, String(count)),
-    ),
-    h('div', { style: grid }, children),
-  )
-}
-
-// auto-fit (not auto-fill) so tracks collapse and content uses the full width on
-// wide viewports; default stretch (no alignItems:start) so short cards next to
-// tall neighbors fill the row instead of stranding dead background pockets.
-const CARD_GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 8 }
-const TILE_GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 6 }
-const CHIP_FLOW = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }
-
-// ---------- attention cards ----------
 
 function card(children, accent) {
   return h('div', {
     style: {
       background: 'var(--card, var(--bg))', border: '1px solid var(--border)',
-      borderLeft: `3px solid ${accent}`, borderRadius: 6, padding: '9px 11px', minWidth: 0,
-      height: '100%', boxSizing: 'border-box',
+      borderLeft: `3px solid ${accent}`, borderRadius: 6, padding: '9px 11px',
+      minWidth: 0, boxSizing: 'border-box',
     },
   }, children)
 }
 
-function CardHeader({ item, now, navigate, label, base, baseTint, fresh, extra }) {
-  const s = item.slot
-  const u = urgency(item, now, base, baseTint)
-  return h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minWidth: 0 } },
-    h(Pill, { bg: u.tint, fg: u.color }, u.hot ? label + ' · ' + rel(item.waitTs, now) : label),
-    fresh ? h(Pill, { bg: AIM, fg: '#fff' }, 'NEW') : null,
-    extra || null,
-    s ? h(SlotTitle, { slot: s, navigate }) : null,
-    u.hot ? null : h('span', { style: { marginLeft: 'auto', fontSize: 10, color: 'var(--muted)', flexShrink: 0 } },
-      rel(item.waitTs, now)),
-  )
-}
+// ---------- live blocker cards ----------
 
-function QuestionCard({ item, now, navigate, onDone, fresh }) {
-  const [answers, setAnswers] = useState({})
-  const [text, setText] = useState({})
-  const [custom, setCustom] = useState({}) // custom-answer input revealed on demand
-  const ask = item.asks[0]
-  const qs = (ask.questions || []).map((q) => ({
-    text: String(q.question ?? q.text ?? ''),
-    options: (q.options || []).map((o) => String(o?.label ?? o)),
-  }))
-
-  const [submit, busy, fail] = useAction(async (final) => {
-    await post('/api/ask-question/' + encodeURIComponent(ask.ask_id) + '/answer', { answers: final })
-    onDone()
+function QuestionCard({ b, now, navigate, onAction }) {
+  const [text, setText] = useState('')
+  const [showCustom, setShowCustom] = useState(false)
+  const ask = b.asks[0]
+  const q = (ask.questions || [])[0] || {}
+  const qText = String(q.question ?? q.text ?? '')
+  const options = (q.options || []).map((o) => String(o?.label ?? o))
+  const [submit, busy, fail] = useAction(async (val) => {
+    await post('/api/ask-question/' + encodeURIComponent(ask.ask_id) + '/answer', { answers: { [qText]: val } })
+    onAction()
   })
-  const pick = (qt, val) => {
-    const next = { ...answers, [qt]: val }
-    setAnswers(next)
-    if (qs.every((q) => next[q.text])) submit(next)
-  }
-  const queued = item.asks.length - 1
-
+  const queued = b.asks.length - 1
   return card([
-    h(CardHeader, {
-      key: 'h', item, now, navigate, label: 'QUESTION', base: AIM, baseTint: AIM_TINT, fresh,
-      extra: queued > 0 ? h(Pill, { bg: 'var(--border)', fg: 'var(--muted)' }, '+' + queued + ' queued') : null,
-    }),
-    ...qs.map((q, i) => h('div', { key: i, style: { marginBottom: 4 } },
-      h('div', { style: { fontSize: 12, color: 'var(--text)', marginBottom: 5, whiteSpace: 'pre-wrap' } }, q.text),
-      h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
-        ...q.options.map((o, j) => h(GhostBtn, {
-          key: j, disabled: busy,
-          onClick: () => pick(q.text, o),
-        }, answers[q.text] === o ? '✓ ' + o : o)),
-        custom[q.text]
-          ? h('input', {
-              placeholder: 'custom…', disabled: busy, autoFocus: true,
-              value: text[q.text] || '',
-              onChange: (e) => setText({ ...text, [q.text]: e.target.value }),
-              onKeyDown: (e) => { if (e.key === 'Enter' && (text[q.text] || '').trim()) pick(q.text, text[q.text].trim()) },
-              style: {
-                background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)',
-                borderRadius: 9999, padding: '2px 9px', fontSize: 11, width: 110, outline: 'none',
-              },
-            })
-          : h('button', {
-              disabled: busy,
-              onClick: () => setCustom({ ...custom, [q.text]: true }),
-              style: {
-                background: 'transparent', color: 'var(--muted)', border: '1px dashed var(--border)',
-                borderRadius: 9999, padding: '2px 9px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
-              },
-            }, 'custom…'),
-      ),
-    )),
+    h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minWidth: 0 } },
+      h(Pill, { bg: AIM_TINT, fg: AIM }, 'QUESTION · ' + rel(b.waitTs, now)),
+      queued > 0 ? h(Pill, { bg: 'var(--border)', fg: MUTED }, '+' + queued + ' queued') : null,
+      b.slot ? h(SlotLink, { slotKey: b.slot.key, title: b.slot.title, navigate }) : null,
+    ),
+    h('div', { key: 'q', style: { fontSize: 12, color: 'var(--text)', marginBottom: 5, whiteSpace: 'pre-wrap' } }, qText),
+    h('div', { key: 'o', style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+      ...options.map((o, i) => h(GhostBtn, { key: i, disabled: busy, onClick: () => submit(o) }, o)),
+      showCustom
+        ? h('input', {
+            placeholder: 'custom…', disabled: busy, autoFocus: true, value: text,
+            onChange: (e) => setText(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter' && text.trim()) submit(text.trim()) },
+            style: { background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, width: 130, outline: 'none' },
+          })
+        : h('button', {
+            disabled: busy, onClick: () => setShowCustom(true),
+            style: { background: 'transparent', color: MUTED, border: '1px dashed var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, cursor: 'pointer' },
+          }, 'custom…'),
+    ),
     h(FailNote, { key: 'f', fail }),
-  ], urgency(item, now, AIM, AIM_TINT).color)
+  ], AIM)
 }
 
-function ApprovalCard({ item, now, navigate, onDone, fresh }) {
-  const s = item.slot
-  const info = item.info
+function ApprovalCard({ b, now, navigate, onAction }) {
+  const info = b.info
   const preview = typeof info.tool_input === 'string' ? info.tool_input : JSON.stringify(info.tool_input || {})
   const [act, busy, fail] = useAction(async (action) => {
-    await post('/api/chat/slots/' + encodeURIComponent(s.key) + '/approve', { action, request_id: info.request_id || '' })
-    onDone()
+    await post('/api/chat/slots/' + encodeURIComponent(b.slot.key) + '/approve', { action, request_id: info.request_id || '' })
+    onAction()
   })
   return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: 'APPROVAL', base: WARN, baseTint: WARN_TINT, fresh }),
+    h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minWidth: 0 } },
+      h(Pill, { bg: 'rgba(180, 83, 9, .14)', fg: WARN }, 'APPROVAL · ' + rel(b.waitTs, now)),
+      h(SlotLink, { slotKey: b.slot.key, title: b.slot.title, navigate }),
+    ),
     h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
       h('code', null, (info.tool || 'tool') + '  ' + preview.slice(0, 140))),
     h('div', { key: 'a', style: { display: 'flex', gap: 5 } },
@@ -329,22 +206,19 @@ function ApprovalCard({ item, now, navigate, onDone, fresh }) {
       h(GhostBtn, { disabled: busy, danger: true, onClick: () => act('rejected') }, 'Deny'),
     ),
     h(FailNote, { key: 'f', fail }),
-  ], urgency(item, now, WARN, WARN_TINT).color)
+  ], WARN)
 }
 
-function BgApprovalCard({ item, now, onDone, fresh }) {
-  const a = item.appr
-  const u = urgency(item, now, WARN, WARN_TINT)
+function BgApprovalCard({ b, now, onAction }) {
+  const a = b.appr
   const [act, busy, fail] = useAction(async (action) => {
     await post('/api/approvals/' + encodeURIComponent(a.id) + '/' + action)
-    onDone()
+    onAction()
   })
   return card([
     h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 } },
-      h(Pill, { bg: u.tint, fg: u.color }, u.hot ? 'APPROVAL · ' + rel(item.waitTs, now) : 'APPROVAL'),
-      fresh ? h(Pill, { bg: AIM, fg: '#fff' }, 'NEW') : null,
+      h(Pill, { bg: 'rgba(180, 83, 9, .14)', fg: WARN }, 'APPROVAL · ' + rel(b.waitTs, now)),
       h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--text)' } }, a.source || 'background'),
-      u.hot ? null : h('span', { style: { marginLeft: 'auto', fontSize: 10, color: 'var(--muted)' } }, rel(item.waitTs, now)),
     ),
     h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
       h('code', null, (a.tool || '') + '  ' + String(a.tool_purpose || '').slice(0, 120))),
@@ -353,444 +227,181 @@ function BgApprovalCard({ item, now, onDone, fresh }) {
       h(GhostBtn, { disabled: busy, danger: true, onClick: () => act('reject') }, 'Deny'),
     ),
     h(FailNote, { key: 'f', fail }),
-  ], u.color)
+  ], WARN)
 }
 
-function ChoiceCard({ item, now, navigate, onDone, plan, fresh }) {
-  const s = item.slot
+function ChoiceCard({ b, now, navigate, onAction }) {
+  const s = b.slot
   const [act, busy, fail] = useAction(async (opt) => {
-    if (plan) {
-      await post('/api/chat/slots/' + encodeURIComponent(s.key) + '/plan-action', { action: opt.toLowerCase() })
-    } else {
-      await post('/api/chat?ws=1', { message: opt, slot: s.key })
-    }
-    onDone()
+    if (b.plan) await post('/api/chat/slots/' + encodeURIComponent(s.key) + '/plan-action', { action: opt.toLowerCase() })
+    else await toAgent(opt, s.key)
+    onAction()
   })
   return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: plan ? 'PLAN GATE' : 'CHOICE', base: AIM, baseTint: AIM_TINT, fresh }),
-    s.prompt_preview ? h('div', { key: 'p', style: { fontSize: 11, color: 'var(--muted)', marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } },
+    h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minWidth: 0 } },
+      h(Pill, { bg: AIM_TINT, fg: AIM }, (b.plan ? 'PLAN GATE' : 'CHOICE') + ' · ' + rel(b.waitTs, now)),
+      h(SlotLink, { slotKey: s.key, title: s.title, navigate }),
+    ),
+    s.prompt_preview ? h('div', { key: 'p', style: { fontSize: 11, color: MUTED, marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } },
       String(s.prompt_preview).slice(0, 200)) : null,
     h('div', { key: 'o', style: { display: 'flex', flexWrap: 'wrap', gap: 5 } },
       ...s.options.map((o, i) => h(GhostBtn, { key: i, disabled: busy, onClick: () => act(String(o)) }, String(o)))),
     h(FailNote, { key: 'f', fail }),
-  ], urgency(item, now, AIM, AIM_TINT).color)
+  ], AIM)
 }
 
-function CappedCard({ item, now, navigate, onDone, fresh }) {
-  const lp = item.loop
-  const s = item.slot
-  const capDesc = lp.stopped_reason === 'cycle_cap' ? 'cycle cap (' + lp.cycle_count + ')' : 'runtime budget'
-  const [resume, busy, fail] = useAction(async () => {
-    // Background message into the same slot: the agent re-arms its own loop.
-    await post('/api/chat?ws=1', {
-      slot: s.key,
-      message: 'Your monitoring loop stopped after hitting its ' + capDesc +
-        ' without meeting the exit condition. If the goal is still worth pursuing, re-arm the loop' +
-        ' (monitor_start, or monitor_update with a higher cap) and continue; otherwise summarize' +
-        ' where things stand and what you need from me. Goal: ' + loopGoal(lp),
-    })
-    onDone()
+const BLOCKER_CARD = { question: QuestionCard, approval: ApprovalCard, bgApproval: BgApprovalCard, choice: ChoiceCard }
+
+// ---------- the brief ----------
+
+function BriefItem({ item, navigate, sent, onSent }) {
+  const [send, busy, fail] = useAction(async () => {
+    const msg = item.action ? item.action.message : 'From the Glance brief, please handle this: ' + item.text
+    await toAgent(msg, HANDLER_SLOT)
+    onSent(item.id)
   })
-  return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: 'LOOP ENDED', base: WARN, baseTint: WARN_TINT, fresh }),
-    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6 } },
-      'Hit its ' + capDesc + ' without finishing: ' + loopGoal(lp)),
-    h('div', { key: 'a', style: { display: 'flex', gap: 5, alignItems: 'center' } },
-      h(SolidBtn, { disabled: busy, onClick: resume }, busy ? 'Resuming…' : 'Resume loop'),
-      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'asks the agent to re-arm and continue'),
+  const wasSent = Boolean(sent[item.id])
+  return h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 2px', borderBottom: '1px solid var(--border)', minWidth: 0 } },
+    h('span', { style: { display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: PRIORITY_DOT[item.priority], flexShrink: 0, position: 'relative', top: -1 } }),
+    h('div', { style: { minWidth: 0, flex: 1 } },
+      h('span', { style: { fontSize: 13, color: 'var(--text)' } }, item.text),
+      fail ? h(FailNote, { fail }) : null,
     ),
-    h(FailNote, { key: 'f', fail }),
-  ], urgency(item, now, WARN, WARN_TINT).color)
+    wasSent
+      ? h('span', {
+          onClick: () => navigate('/chat?sid=' + HANDLER_SLOT),
+          style: { fontSize: 11, color: 'var(--ok, #047857)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
+        }, '✓ sent — open ↗')
+      : h(Fragment, null,
+          item.priority !== 'fyi' || item.action
+            ? h(GhostBtn, { disabled: busy, onClick: send }, item.action ? item.action.label : 'Handle it')
+            : null,
+          item.session ? h('span', {
+              onClick: () => navigate('/chat?sid=' + encodeURIComponent(item.session)),
+              style: { fontSize: 11, color: MUTED, cursor: 'pointer', flexShrink: 0 },
+            }, '↗') : null,
+        ),
+  )
 }
 
-function StalledCard({ item, now, navigate, onDone, fresh }) {
-  const s = item.slot
-  const [stop, busy, fail] = useAction(async () => {
-    // Cooperative stop — same endpoint as the chat UI's Stop button.
-    await post('/api/chat/slots/' + encodeURIComponent(s.key) + '/stop')
-    onDone()
+function AgentBar({ onSent, navigate, sentFree }) {
+  const [text, setText] = useState('')
+  const [send, busy, fail] = useAction(async () => {
+    const msg = text.trim()
+    if (!msg) return
+    await toAgent(msg, HANDLER_SLOT)
+    setText('')
+    onSent()
   })
-  return card([
-    h(CardHeader, { key: 'h', item, now, navigate, label: 'STALLED', base: DANGER, baseTint: DANGER_TINT, fresh }),
-    h('div', { key: 'b', style: { fontSize: 11, color: 'var(--text)', marginBottom: 6 } },
-      'Running with no activity for ' + rel(item.waitTs, now) + ' — the turn may be hung.' +
-      (s.last_message ? ' Last: ' + String(s.last_message).slice(0, 120) : '')),
-    h('div', { key: 'a', style: { display: 'flex', gap: 5, alignItems: 'center' } },
-      h(GhostBtn, { disabled: busy, danger: true, onClick: stop }, busy ? 'Stopping…' : 'Stop turn'),
-      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'cooperative stop — click title to inspect first'),
+  return h('div', { style: { marginTop: 14 } },
+    h('div', { style: { display: 'flex', gap: 6 } },
+      h('input', {
+        placeholder: 'Tell the agent…', value: text, disabled: busy,
+        onChange: (e) => setText(e.target.value),
+        onKeyDown: (e) => { if (e.key === 'Enter') send() },
+        style: { flex: 1, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 9999, padding: '6px 13px', fontSize: 12, outline: 'none' },
+      }),
+      h(SolidBtn, { disabled: busy || !text.trim(), onClick: send }, 'Send'),
     ),
-    h(FailNote, { key: 'f', fail }),
-  ], DANGER)
-}
-
-// ---------- tiles (working / mission) ----------
-
-function tileStyle() {
-  return {
-    border: '1px solid var(--border)', borderRadius: 6, padding: '5px 9px',
-    cursor: 'pointer', minWidth: 0, background: 'var(--card, var(--bg))',
-    height: '100%', boxSizing: 'border-box',
-  }
-}
-
-function tileHover(e, on) { e.currentTarget.style.borderColor = on ? ACCENT : 'var(--border)' }
-
-function WorkTile({ item, now, navigate }) {
-  const s = item.slot
-  const sub = s.stopping ? 'stopping…' : (s.last_message || '')
-  return h('div', {
-    style: tileStyle(),
-    title: item.stalled ? 'No activity for ' + rel(item.lastTs, now) + ' while running — the turn may be stuck' : undefined,
-    onClick: () => navigate('/chat?sid=' + encodeURIComponent(s.key)),
-    onMouseEnter: (e) => tileHover(e, true), onMouseLeave: (e) => tileHover(e, false),
-  },
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-      h(Dot, { color: item.stalled ? WARN : OK, pulse: !item.stalled }),
-      ellip(s.title || s.key, { fontWeight: 600, fontSize: 12, flex: 1 }),
-      item.stalled ? h(Pill, { bg: WARN_TINT, fg: WARN }, 'stalled ' + rel(item.lastTs, now)) : null,
-      s.queue_depth > 0 ? h(Pill, { bg: ACCENT_TINT, fg: ACCENT }, '+' + s.queue_depth) : null,
-      h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } }, rel(item.lastTs, now)),
-    ),
-    // No blank second line when there is no preview — free density win.
-    sub ? h('div', { style: { fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 } }, sub) : null,
+    sentFree ? h('span', {
+      onClick: () => navigate('/chat?sid=' + HANDLER_SLOT),
+      style: { fontSize: 11, color: 'var(--ok, #047857)', cursor: 'pointer' },
+    }, '✓ sent — open ↗') : null,
+    h(FailNote, { fail }),
   )
 }
 
-const LOOP_LABEL = { research: '🔬', goal: '🎯', monitor: '👁' }
+// ---------- board ----------
 
-function MissionTile({ item, now, navigate }) {
-  const { slot: s, loop: lp } = item
-  const kind = loopKind(lp)
-  const running = s && (s.running || s.orchestrating)
-  const nf = loopNextFire(lp)
-  const title = s ? (s.title || s.key) : (kind === 'research' ? 'Research ' + lp.slot_key.slice(9, 17) : lp.slot_key)
-  return h('div', {
-    style: tileStyle(),
-    onClick: () => { if (s) navigate('/chat?sid=' + encodeURIComponent(s.key)) },
-    onMouseEnter: (e) => tileHover(e, true), onMouseLeave: (e) => tileHover(e, false),
-  },
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-      h('span', { style: { fontSize: 13, flexShrink: 0 } }, LOOP_LABEL[kind]),
-      running ? h(Dot, { color: OK, pulse: true }) : null,
-      ellip(title, { fontWeight: 600, fontSize: 12, flex: 1 }),
-      h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } }, rel(toEpoch(lp.last_fire_ts), now)),
-    ),
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginTop: 1 } },
-      ellip(loopGoal(lp), { fontSize: 11, color: 'var(--muted)', flex: 1 }),
-      !running && nf ? h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } },
-        nf > now ? fut(nf - now) : 'due') : null,
-      h(Pill, item.nearCap ? { bg: WARN_TINT, fg: WARN } : { bg: ACCENT_TINT, fg: ACCENT },
-        (item.nearCap ? '⚠ ' : '') + lp.cycle_count + '/' + (lp.max_cycles || '∞')),
-    ),
-  )
-}
-
-// ---------- quiet chips ----------
-
-function QuietChip({ item, now, navigate, dim }) {
-  const s = item.slot
-  return h('span', {
-    onClick: () => navigate('/chat?sid=' + encodeURIComponent(s.key)),
-    title: s.title || s.key,
-    onMouseEnter: (e) => { e.currentTarget.style.borderColor = ACCENT },
-    onMouseLeave: (e) => { e.currentTarget.style.borderColor = 'var(--border)' },
-    style: {
-      display: 'inline-flex', alignItems: 'center', gap: 5, maxWidth: 220,
-      border: '1px solid var(--border)', borderRadius: 9999, padding: '1px 9px',
-      fontSize: 11, color: 'var(--text)', cursor: 'pointer', opacity: dim ? 0.55 : 0.85,
-      whiteSpace: 'nowrap', lineHeight: '18px',
-    },
-  },
-    ellip(s.title || s.key, {}),
-    h('span', { style: { fontSize: 10, color: 'var(--muted)', flexShrink: 0 } }, rel(item.lastTs, now)),
-  )
-}
-
-// ---------- board (pure presentational — exported for render tests) ----------
-
-// Wrapper for every board item: carries the identity key for keyboard
-// selection (data-glkey), the selection outline, and the section-change flash.
-function Wrap({ k, selKey, deltas, now, inline, children }) {
-  const flash = now - ((deltas && deltas[k]) || 0) < 10
-  const selected = k === selKey
-  return h(inline ? 'span' : 'div', {
-    'data-glkey': k,
-    style: {
-      minWidth: 0, borderRadius: 8,
-      ...(inline ? { display: 'inline-flex' } : {}),
-      outline: selected ? '2px solid ' + AIM : 'none', outlineOffset: 1,
-      animation: flash ? 'glanceFlash 8s ease-out' : 'none',
-    },
-  }, children)
-}
-
-export function Board({ c, now, navigate, onAction, showOlder, setShowOlder, firstSeen, selKey, deltas, emptyLabel }) {
-  const fs = firstSeen || {}
-  const total = c.needsYou.length + c.working.length + c.mission.length +
-    c.quietToday.length + c.quietEarlier.length + c.older.length
-  if (!total) {
-    return h('div', { style: { border: '1px dashed var(--border)', borderRadius: 6, padding: '10px 14px', fontSize: 12, color: 'var(--muted)' } },
-      emptyLabel || 'No sessions yet — the board fills in as agents pick up work.')
-  }
-  const wrap = (item, child, inline) => {
-    const k = boardKey(item)
-    return h(Wrap, { key: k, k, selKey, deltas, now, inline }, child)
-  }
-  return h(Fragment, null,
-    h(Section, { id: 'glance-sec-needs', label: 'Needs you', color: AIM, count: c.needsYou.length, grid: CARD_GRID },
-      ...c.needsYou.map((item) => {
-        const key = itemKey(item) // identity key — a NEW question on the same slot must not inherit typed state
-        const fresh = now - (fs[key] || 0) < NEW_WINDOW
-        let el
-        if (item.kind === 'question') el = h(QuestionCard, { key, item, now, navigate, onDone: onAction, fresh })
-        else if (item.kind === 'approval') el = h(ApprovalCard, { key, item, now, navigate, onDone: onAction, fresh })
-        else if (item.kind === 'bgApproval') el = h(BgApprovalCard, { key, item, now, onDone: onAction, fresh })
-        else if (item.kind === 'plan') el = h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: true, fresh })
-        else if (item.kind === 'choice') el = h(ChoiceCard, { key, item, now, navigate, onDone: onAction, plan: false, fresh })
-        else if (item.kind === 'stalled') el = h(StalledCard, { key, item, now, navigate, onDone: onAction, fresh })
-        else el = h(CappedCard, { key, item, now, navigate, onDone: onAction, fresh })
-        return wrap(item, el)
-      })),
-    h(Section, { id: 'glance-sec-working', label: 'Working', color: OK, count: c.working.length, grid: TILE_GRID },
-      ...c.working.map((item) => wrap(item, h(WorkTile, { item, now, navigate })))),
-    h(Section, { id: 'glance-sec-mission', label: 'On a mission', color: 'var(--text)', count: c.mission.length, grid: TILE_GRID },
-      ...c.mission.map((item) => wrap(item, h(MissionTile, { item, now, navigate })))),
-    h(Section, {
-      id: 'glance-sec-quiet', label: 'Quiet', color: 'var(--muted)',
-      count: c.quietToday.length + c.quietEarlier.length + c.older.length, grid: CHIP_FLOW,
-    },
-      ...c.quietToday.map((item) => wrap(item, h(QuietChip, { item, now, navigate }), true)),
-      ...c.quietEarlier.map((item) => wrap(item, h(QuietChip, { item, now, navigate, dim: true }), true)),
-      c.older.length ? h('span', {
-        key: '__older',
-        onClick: () => setShowOlder(!showOlder),
-        style: {
-          border: '1px dashed var(--border)', borderRadius: 9999, padding: '1px 9px',
-          fontSize: 11, color: 'var(--muted)', cursor: 'pointer', lineHeight: '18px',
-        },
-      }, (showOlder ? '▾' : '▸') + ' ' + c.older.length + ' older') : null,
-      showOlder ? c.older.map((item) => wrap(item, h(QuietChip, { item, now, navigate, dim: true }), true)) : null,
-    ),
+export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, sentFree, onSentFree, onRefresh, refreshBusy }) {
+  return h('div', null,
+    // Live blockers — interactive, never stale.
+    blockers.length ? h('div', { style: { marginBottom: 14 } },
+      h('div', { style: { fontSize: 12, fontWeight: 600, color: AIM, marginBottom: 6 } }, 'Needs you now · ' + blockers.length),
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 8 } },
+        ...blockers.map((b) => h(BLOCKER_CARD[b.kind], { key: blockerKey(b), b, now, navigate, onAction })),
+      ),
+    ) : null,
+    // The brief — the agent's judgment.
+    brief
+      ? h('div', null,
+          brief.headline ? h('div', { style: { fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 4 } }, brief.headline) : null,
+          h('div', { style: { fontSize: 11, color: brief.stale ? WARN : MUTED, marginBottom: 8 } },
+            (brief.stale ? '⚠ stale — written ' : 'as of ') + rel(brief.generatedAt, now) + ' ago',
+            h('span', { onClick: refreshBusy ? undefined : onRefresh, style: { marginLeft: 8, color: ACCENT, cursor: refreshBusy ? 'default' : 'pointer' } },
+              refreshBusy ? 'refreshing…' : '↻ refresh'),
+          ),
+          brief.items.length
+            ? h('div', null, ...brief.items.map((it) => h(BriefItem, { key: it.id, item: it, navigate, sent, onSent })))
+            : h('div', { style: { fontSize: 13, color: MUTED, padding: '10px 0' } }, 'All quiet — nothing needs you.'),
+          brief.quiet ? h('div', { style: { fontSize: 11, color: MUTED, marginTop: 8 } }, brief.quiet) : null,
+        )
+      : h('div', { style: { padding: '18px 0', textAlign: 'center' } },
+          h('div', { style: { fontSize: 13, color: MUTED, marginBottom: 8 } }, 'No brief yet — the curator writes one every 15 minutes.'),
+          h(SolidBtn, { disabled: refreshBusy, onClick: onRefresh }, refreshBusy ? 'writing…' : 'Write the first brief'),
+        ),
+    h(AgentBar, { onSent: onSentFree, navigate, sentFree }),
   )
 }
 
 // ---------- root ----------
 
 export default function GlanceApp() {
-  const [data, setData] = useState(null)
-  const [err, setErr] = useState('')
-  const [showOlder, setShowOlder] = useState(false)
-  const [firstSeen, setFirstSeen] = useState({})
-  const [tick, setTick] = useState(0)
-  const [notify, setNotify] = useState(() => {
-    try { return localStorage.getItem(NOTIFY_PREF_KEY) === '1' } catch { return false }
-  })
-  const [filter, setFilter] = useState('')
-  const [selKey, setSelKey] = useState('')
-  const [deltas, setDeltas] = useState({})
   const navigate = useNavigate()
+  const [live, setLive] = useState(null)
+  const [brief, setBrief] = useState(null)
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  const [err, setErr] = useState('')
+  const [sent, setSent] = useState({})
+  const [sentFree, setSentFree] = useState(false)
   const timer = useRef(null)
-  const lastRaw = useRef('')
-  const searchRef = useRef(null)
-  const prevSecRef = useRef(null)
 
-  const load = useCallback(async () => {
+  const poll = async () => {
+    const t = Math.floor(Date.now() / 1000)
+    setNow(t)
     try {
-      const next = await loadAll()
-      const raw = JSON.stringify(next)
-      if (raw !== lastRaw.current) { // most polls change nothing — skip the re-render churn
-        lastRaw.current = raw
-        setData(next)
-      }
+      const [lv, br] = await Promise.all([loadLive(), loadBrief(t)])
+      setLive(lv)
+      setBrief(br)
       setErr('')
     } catch (e) {
       setErr(String(e && e.message ? e.message : e))
     }
-  }, [])
+  }
 
   useEffect(() => {
-    load()
     const arm = () => {
-      clearInterval(timer.current)
-      timer.current = setInterval(load, document.hidden ? 30000 : 5000)
+      if (timer.current) clearInterval(timer.current)
+      timer.current = setInterval(poll, document.visibilityState === 'visible' ? 5000 : 30000)
     }
+    poll()
     arm()
     document.addEventListener('visibilitychange', arm)
     return () => { clearInterval(timer.current); document.removeEventListener('visibilitychange', arm) }
-  }, [load])
-
-  // Slow clock: with no-op polls skipped, time-driven states (rel labels, stall
-  // escalation, urgency ramp) still need to advance while the data stands still.
-  useEffect(() => {
-    const t = setInterval(() => setTick((x) => x + 1), 30000)
-    return () => clearInterval(t)
   }, [])
 
-  // classify() is pure and the payload only changes on real updates — memoize on
-  // [data, tick] instead of re-deriving 2-3x per render cycle.
-  const view = useMemo(() => {
-    if (!data) return null
-    const now = Date.now() / 1000
-    return { c: classify(data, now), now }
-  }, [data, tick])
+  const [refresh, refreshBusy, refreshFail] = useAction(async () => {
+    await toAgent(REFRESH_MSG, CURATOR_SLOT)
+  })
 
-  // Track first-seen for NEW pills and fire desktop notifications on new items.
-  useEffect(() => {
-    if (!view) return
-    const items = view.c.needsYou
-    const next = trackSeen(items.map(itemKey), view.now)
-    setFirstSeen((prev) => (sameMap(prev, next) ? prev : next))
-    notifyNew(items, notify, navigate)
-  }, [view, notify, navigate])
+  const blockers = live ? extractBlockers(live) : []
 
-  // Section-change deltas: flash items that entered the board or moved buckets
-  // since the previous poll (page load itself is not a change).
-  useEffect(() => {
-    if (!view) return
-    const secs = sectionMap(view.c)
-    const changed = sectionDeltas(prevSecRef.current, secs)
-    prevSecRef.current = secs
-    if (changed.length) {
-      setDeltas((d) => {
-        const nd = {}
-        for (const k of Object.keys(d)) if (view.now - d[k] < 60) nd[k] = d[k] // prune stale entries
-        for (const k of changed) nd[k] = view.now
-        return nd
-      })
-    }
-  }, [view])
-
-  // Tab badge (DESIGN.md promise): needs-you count in the document title while
-  // Glance is mounted; the original title is restored on unmount.
-  useEffect(() => {
-    const orig = document.title
-    return () => { document.title = orig }
-  }, [])
-  useEffect(() => {
-    const n = view ? view.c.needsYou.length : 0
-    document.title = (n ? '(' + n + ') ' : '') + 'Glance'
-  }, [view])
-
-  // Board view: the filter narrows what's shown; header counts stay global.
-  const shown = useMemo(() => (view ? filterClassified(view.c, filter) : null), [view, filter])
-  const flat = useMemo(() => (shown ? flattenBoard(shown, showOlder) : []), [shown, showOlder])
-
-  // Keyboard: j/k move the selection, Enter opens the session, / focuses the
-  // filter, Escape clears the selection. Suppressed while typing in inputs.
-  useEffect(() => {
-    const onKey = (e) => {
-      const t = e.target
-      const inInput = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      if (e.key === '/' && !inInput) {
-        e.preventDefault()
-        if (searchRef.current) searchRef.current.focus()
-        return
-      }
-      if (inInput || e.altKey || e.ctrlKey || e.metaKey) return
-      if (e.key === 'j' || e.key === 'k') {
-        if (!flat.length) return
-        const i = flat.findIndex((f) => f.key === selKey)
-        const n = e.key === 'j' ? Math.min(i + 1, flat.length - 1) : Math.max(i < 0 ? 0 : i - 1, 0)
-        setSelKey(flat[n].key)
-      } else if (e.key === 'Enter' && selKey) {
-        const f = flat.find((x) => x.key === selKey)
-        if (f && f.slotKey) navigate('/chat?sid=' + encodeURIComponent(f.slotKey))
-      } else if (e.key === 'Escape' && selKey) {
-        setSelKey('')
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [flat, selKey, navigate])
-
-  // Selection follows its item by identity; clear it when the item leaves the
-  // board, and keep the selected element scrolled into view.
-  useEffect(() => {
-    if (selKey && !flat.some((f) => f.key === selKey)) setSelKey('')
-  }, [flat, selKey])
-  useEffect(() => {
-    if (!selKey || typeof CSS === 'undefined') return
-    const el = document.querySelector('[data-glkey="' + CSS.escape(selKey) + '"]')
-    if (el) el.scrollIntoView({ block: 'nearest' })
-  }, [selKey])
-
-  const toggleNotify = useCallback(() => {
-    const next = !notify
-    if (next && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
-    // Seed dedup with current items so enabling doesn't burst-notify the backlog.
-    if (next && view) {
-      const seed = {}
-      for (const item of view.c.needsYou) seed[itemKey(item)] = 1
-      writeStore(NOTIFIED_KEY, seed)
-    }
-    setNotify(next)
-    try { localStorage.setItem(NOTIFY_PREF_KEY, next ? '1' : '0') } catch { /* ignore */ }
-  }, [notify, view])
-
-  const now = view ? view.now : Date.now() / 1000
-  const c = view ? view.c : null
-  const quietTotal = c ? c.quietToday.length + c.quietEarlier.length + c.older.length : 0
-  const stalled = c ? c.working.filter((w) => w.stalled).length : 0
-  const notifyBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied'
-
-  const scrollTo = (id) => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
-  const seg = (txt, id, color) => h('span', {
-    onClick: () => scrollTo(id),
-    style: { cursor: 'pointer', color: color || 'var(--muted)' },
-  }, txt)
-
-  return h('div', { style: { padding: '0 14px 10px', color: 'var(--text)', position: 'relative' } },
-    h('style', null, '@keyframes glancePulse { 0%,100% {opacity:1; transform:scale(1)} 50% {opacity:.35; transform:scale(.8)} } @keyframes glanceFlash { from { box-shadow: 0 0 0 2px rgba(139, 92, 246, .45) } to { box-shadow: 0 0 0 2px rgba(139, 92, 246, 0) } }'),
-    // Sticky summary strip: the counts stay visible however far the board scrolls;
-    // each count jumps to its section.
-    h('div', { style: { position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0 6px', marginBottom: 6 } },
-      h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: ACCENT, strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
-        h('circle', { cx: 12, cy: 12, r: 2 }),
-        h('path', { d: 'M12 6a6 6 0 0 1 6 6' }),
-        h('path', { d: 'M12 2a10 10 0 0 1 10 10' }),
-        h('path', { d: 'M12 18a6 6 0 0 1-6-6' }),
-        h('path', { d: 'M12 22A10 10 0 0 1 2 12' })),
-      h('h2', { style: { margin: 0, fontSize: 16 } }, 'Glance'),
-      c ? h('span', { style: { fontSize: 11, color: 'var(--muted)' } },
-        c.needsYou.length
-          ? seg(c.needsYou.length + ' need you', 'glance-sec-needs', AIM)
-          : '✨ nothing needs you',
-        ' · ', seg(c.working.length + ' working', 'glance-sec-working'),
-        ' · ', seg(c.mission.length + ' on a mission', 'glance-sec-mission'),
-        ' · ', seg(quietTotal + ' quiet', 'glance-sec-quiet'),
-      ) : h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, 'loading…'),
-      stalled ? h(Pill, { bg: WARN_TINT, fg: WARN }, stalled + ' stalled') : null,
-      h('input', {
-        ref: searchRef,
-        value: filter,
-        placeholder: 'filter  ( / )',
-        'aria-label': 'Filter sessions',
-        onChange: (e) => setFilter(e.target.value),
-        onKeyDown: (e) => { if (e.key === 'Escape') { setFilter(''); e.currentTarget.blur() } },
-        style: {
-          marginLeft: 'auto', background: 'var(--card, var(--bg))', color: 'var(--text)',
-          border: '1px solid var(--border)', borderRadius: 9999, padding: '2px 10px',
-          fontSize: 11, width: 130, outline: 'none',
-        },
-      }),
-      h('button', {
-        onClick: toggleNotify,
-        title: notifyBlocked
-          ? 'Browser notifications are blocked for this site — allow them in browser settings'
-          : (notify ? 'Desktop notifications ON — click to disable' : 'Notify me when something needs me'),
-        style: {
-          background: 'none', border: 'none', cursor: 'pointer',
-          fontSize: 13, lineHeight: 1, padding: '2px 4px', opacity: notify && !notifyBlocked ? 1 : 0.45,
-        },
-      }, notify && !notifyBlocked ? '🔔' : '🔕'),
-      h('span', { style: { fontSize: 10, color: 'var(--muted)' } }, 'v' + VERSION),
+  return h('div', { style: { padding: '14px 18px', maxWidth: 980, margin: '0 auto', fontFamily: 'inherit' } },
+    h('style', null, '@keyframes glancePulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }'),
+    h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 } },
+      h('span', { style: { fontSize: 16, fontWeight: 700, color: 'var(--text)' } }, 'Glance'),
+      h('span', { style: { fontSize: 10, color: MUTED } }, 'v' + VERSION + ' · the agent reads, you glance'),
+      err ? h('span', { style: { fontSize: 10, color: DANGER, marginLeft: 'auto' } }, '⚠ ' + err) : null,
     ),
-    err ? h('div', { style: { border: '1px solid ' + DANGER, borderRadius: 6, padding: '6px 10px', fontSize: 11, color: DANGER, marginBottom: 10 } }, err) : null,
-    shown ? h(Board, {
-      c: shown, now, navigate, onAction: load, showOlder, setShowOlder, firstSeen, selKey, deltas,
-      emptyLabel: filter.trim() ? 'No matches for "' + filter.trim() + '"' : undefined,
-    }) : null,
+    live === null && brief === null
+      ? h('div', { style: { fontSize: 12, color: MUTED } }, 'loading…')
+      : h(Board, {
+          brief, blockers, now, navigate,
+          onAction: poll,
+          sent, onSent: (id) => setSent((p) => ({ ...p, [id]: true })),
+          sentFree, onSentFree: () => setSentFree(true),
+          onRefresh: refresh, refreshBusy,
+        }),
+    refreshFail ? h(FailNote, { fail: refreshFail }) : null,
   )
 }
