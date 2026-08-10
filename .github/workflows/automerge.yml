@@ -1,0 +1,39 @@
+name: CI + automerge
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Unit tests (classifier)
+        run: node --test tests/
+      - name: Render smoke test (self-skips without a React host)
+        run: bash tests/run-render-test.sh
+
+  automerge:
+    needs: test
+    # Only auto-merge PRs authored by the repo owner; label 'no-automerge' opts out.
+    if: >
+      github.event.pull_request.user.login == 'rubencu' &&
+      github.event.pull_request.draft == false &&
+      !contains(github.event.pull_request.labels.*.name, 'no-automerge')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Squash-merge the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --squash --delete-branch
