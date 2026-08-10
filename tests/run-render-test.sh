@@ -20,7 +20,7 @@ EOF
 # Rewired copy of the UI module (imports only — code untouched)
 sed -e "s|from 'react'|from '$REACT_HOST/node_modules/react/index.js'|" \
     -e "s|from '@kirocrew/app-sdk'|from './app-sdk-stub.mjs'|" \
-    -e "s|from './classify.mjs'|from '../ui/classify.mjs'|" \
+    -e "s|from './brief.mjs'|from '../ui/brief.mjs'|" \
     ../ui/index.mjs > index.test-rewired.mjs
 
 # Rewire the harness's react imports the same way
