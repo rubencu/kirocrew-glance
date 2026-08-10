@@ -53,7 +53,9 @@ const html = renderToStaticMarkup(h(Board, {
 const mustContain = [
   'Needs you', 'Working', 'On a mission', 'Quiet',
   'Which AWS account should I deploy to?', 'dev', 'prod',            // question card w/ text + options
-  '+1 more question queued',                                          // second pending ask surfaced
+  '+1 queued',                                                        // second pending ask surfaced as header pill
+  'custom…',                                                          // custom-answer reveal button
+  'PLAN GATE · 1h',                                                   // wait-age escalated into the label pill (≥1h)
   'execute_bash', 'Approve', 'Deny',                                  // approval card
   'PLAN GATE', 'Go All',                                              // plan card
   'Strip it back', 'Park it',                                         // choice card
@@ -79,7 +81,7 @@ const cEmpty = classify({ slots: [], loops: [], questions: [], approvals: [] }, 
 const emptyHtml = renderToStaticMarkup(h(Board, {
   c: cEmpty, now: NOW, navigate: () => {}, onAction: () => {}, showOlder: false, setShowOlder: () => {},
 }))
-assert.ok(emptyHtml.includes('Nothing needs you right now'), 'empty celebration')
+assert.ok(emptyHtml.includes('No sessions yet'), 'empty-board state')
 
 // --- Root component initial render (loading state, no effects server-side) ---
 const rootHtml = renderToStaticMarkup(h(GlanceApp))
