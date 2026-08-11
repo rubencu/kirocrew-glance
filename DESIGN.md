@@ -107,6 +107,16 @@ changes both sides:
 
 `fyi` and pulse-less briefs still parse — the schema stays `v:1`, additive.
 
+## v2.2 — parallel delegation + push on new blockers
+
+- Each delegated brief action now runs in its own `glance-h-<item-id>` slot
+  (`handlerSlotFor` in `ui/brief.mjs`) — ten clicks means ten concurrent
+  sessions, not a queue behind one shared handler. The free-text bar keeps
+  the shared `glance-handler` slot.
+- The curator may publish at most one bell notification per run, only when a
+  `now` item with a previously-unseen id appeared — so a newly blocked agent
+  reaches the human without the Glance tab open. Everything else stays pull.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

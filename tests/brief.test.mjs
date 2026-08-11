@@ -2,7 +2,7 @@
 // blocker extraction. Run: node --test tests/
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { toEpoch, rel, parseBrief, extractBlockers, blockerKey, STALE_AFTER } from '../ui/brief.mjs'
+import { toEpoch, rel, parseBrief, extractBlockers, blockerKey, handlerSlotFor, STALE_AFTER } from '../ui/brief.mjs'
 
 const NOW = 1_800_000_000
 
@@ -102,6 +102,15 @@ test('parseBrief empty items renders as all-quiet (ok with zero items)', () => {
   const b = parseBrief(validBrief({ items: [], headline: 'All quiet — nothing needs you.' }), NOW)
   assert.equal(b.ok, true)
   assert.equal(b.items.length, 0)
+})
+
+test('handlerSlotFor: stable, sanitized, clamped per-item slots', () => {
+  assert.equal(handlerSlotFor('pr-2431-review'), 'glance-h-pr-2431-review')
+  assert.equal(handlerSlotFor('pr-2431-review'), handlerSlotFor('pr-2431-review')) // stable
+  assert.equal(handlerSlotFor('Weird ID!! with spaces'), 'glance-h-weird-id-with-spaces')
+  assert.equal(handlerSlotFor(''), 'glance-h-item')
+  assert.equal(handlerSlotFor(null), 'glance-h-item')
+  assert.ok(handlerSlotFor('x'.repeat(100)).length <= 'glance-h-'.length + 32)
 })
 
 test('parseBrief parses pulse counts; clamps garbage; null when absent or malformed', () => {

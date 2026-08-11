@@ -13,9 +13,9 @@
 //   3. One free-text line to the agent.
 import { useState, useEffect, useRef, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { parseBrief, extractBlockers, blockerKey, rel } from './brief.mjs'
+import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, rel } from './brief.mjs'
 
-const VERSION = '2.1.0'
+const VERSION = '2.2.0'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -283,8 +283,11 @@ function BriefItem({ item, navigate, sent, onSent }) {
   const [showGuide, setShowGuide] = useState(false)
   const [send, busy, fail] = useAction(async () => {
     const msg = item.action ? item.action.message : 'From the Glance brief, please handle this: ' + item.text
-    await toAgent(msg, HANDLER_SLOT)
-    onSent(item.id, HANDLER_SLOT)
+    // Per-item slot: ten delegated actions run as ten parallel sessions
+    // instead of queueing behind one shared handler.
+    const slot = handlerSlotFor(item.id)
+    await toAgent(msg, slot)
+    onSent(item.id, slot)
   })
   // Guidance goes into the item's OWN session — that is the agent that needs
   // steering, not the generic handler.

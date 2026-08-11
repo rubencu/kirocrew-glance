@@ -134,3 +134,13 @@ export function blockerKey(b) {
   if (b.kind === 'bgApproval') return 'bga-' + b.appr.id
   return b.kind + '-' + (b.slot ? b.slot.key : '?')
 }
+
+// ---------- delegation ----------
+
+// Per-item handler slot, so ten delegated actions run in ten parallel
+// sessions instead of queueing behind one shared handler. Derived from the
+// item id (curator keeps ids stable), sanitized to a safe slot key.
+export function handlerSlotFor(itemId) {
+  const safe = String(itemId || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
+  return 'glance-h-' + (safe || 'item')
+}
