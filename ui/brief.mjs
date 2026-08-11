@@ -63,12 +63,18 @@ export function parseBrief(raw, now) {
   // now first, then soon, then fyi; stable within a priority (curator's order).
   const rank = { now: 0, soon: 1, fyi: 2 }
   items.sort((a, b2) => rank[a.priority] - rank[b2.priority])
+  // Pulse: agent counts at a glance (optional; additive to schema v1).
+  const clampCount = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.min(Math.floor(x), 999) : 0)
+  const pulse = b.pulse && typeof b.pulse === 'object' && !Array.isArray(b.pulse)
+    ? { working: clampCount(b.pulse.working), waiting: clampCount(b.pulse.waiting), stalled: clampCount(b.pulse.stalled) }
+    : null
   return {
     ok: true,
     generatedAt,
     ageSecs,
     stale: ageSecs > STALE_AFTER,
     headline: typeof b.headline === 'string' ? b.headline.trim().slice(0, 140) : '',
+    pulse,
     items,
     quiet: typeof b.quiet === 'string' ? b.quiet.trim().slice(0, 200) : '',
   }

@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, createElement as h, Fragment } from 'react
 import { useNavigate } from '@kirocrew/app-sdk'
 import { parseBrief, extractBlockers, blockerKey, rel } from './brief.mjs'
 
-const VERSION = '2.0.0'
+const VERSION = '2.1.0'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -232,9 +232,21 @@ function BgApprovalCard({ b, now, onAction }) {
 
 function ChoiceCard({ b, now, navigate, onAction }) {
   const s = b.slot
+  const [guide, setGuide] = useState('')
+  const [showGuide, setShowGuide] = useState(false)
   const [act, busy, fail] = useAction(async (opt) => {
     if (b.plan) await post('/api/chat/slots/' + encodeURIComponent(s.key) + '/plan-action', { action: opt.toLowerCase() })
     else await toAgent(opt, s.key)
+    onAction()
+  })
+  // Free-text guidance always goes straight into the session as a user
+  // message — preset options rarely fit what a stuck agent actually needs.
+  const [sendGuide, guideBusy, guideFail] = useAction(async () => {
+    const msg = guide.trim()
+    if (!msg) return
+    await toAgent(msg, s.key)
+    setGuide('')
+    setShowGuide(false)
     onAction()
   })
   return card([
@@ -244,9 +256,21 @@ function ChoiceCard({ b, now, navigate, onAction }) {
     ),
     s.prompt_preview ? h('div', { key: 'p', style: { fontSize: 11, color: MUTED, marginBottom: 6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } },
       String(s.prompt_preview).slice(0, 200)) : null,
-    h('div', { key: 'o', style: { display: 'flex', flexWrap: 'wrap', gap: 5 } },
-      ...s.options.map((o, i) => h(GhostBtn, { key: i, disabled: busy, onClick: () => act(String(o)) }, String(o)))),
-    h(FailNote, { key: 'f', fail }),
+    h('div', { key: 'o', style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+      ...s.options.map((o, i) => h(GhostBtn, { key: i, disabled: busy || guideBusy, onClick: () => act(String(o)) }, String(o))),
+      showGuide
+        ? h('input', {
+            placeholder: 'guidance…', disabled: guideBusy, autoFocus: true, value: guide,
+            onChange: (e) => setGuide(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter' && guide.trim()) sendGuide() },
+            style: { background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, width: 160, outline: 'none' },
+          })
+        : h('button', {
+            disabled: busy || guideBusy, onClick: () => setShowGuide(true),
+            style: { background: 'transparent', color: MUTED, border: '1px dashed var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, cursor: 'pointer' },
+          }, 'guide…'),
+    ),
+    h(FailNote, { key: 'f', fail: fail || guideFail }),
   ], AIM)
 }
 
@@ -255,26 +279,51 @@ const BLOCKER_CARD = { question: QuestionCard, approval: ApprovalCard, bgApprova
 // ---------- the brief ----------
 
 function BriefItem({ item, navigate, sent, onSent }) {
+  const [guide, setGuide] = useState('')
+  const [showGuide, setShowGuide] = useState(false)
   const [send, busy, fail] = useAction(async () => {
     const msg = item.action ? item.action.message : 'From the Glance brief, please handle this: ' + item.text
     await toAgent(msg, HANDLER_SLOT)
-    onSent(item.id)
+    onSent(item.id, HANDLER_SLOT)
   })
-  const wasSent = Boolean(sent[item.id])
+  // Guidance goes into the item's OWN session — that is the agent that needs
+  // steering, not the generic handler.
+  const [sendGuide, guideBusy, guideFail] = useAction(async () => {
+    const msg = guide.trim()
+    if (!msg) return
+    await toAgent(msg, item.session)
+    setGuide('')
+    setShowGuide(false)
+    onSent(item.id, item.session)
+  })
+  const sentTo = sent[item.id]
   return h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 2px', borderBottom: '1px solid var(--border)', minWidth: 0 } },
     h('span', { style: { display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: PRIORITY_DOT[item.priority], flexShrink: 0, position: 'relative', top: -1 } }),
     h('div', { style: { minWidth: 0, flex: 1 } },
       h('span', { style: { fontSize: 13, color: 'var(--text)' } }, item.text),
-      fail ? h(FailNote, { fail }) : null,
+      fail || guideFail ? h(FailNote, { fail: fail || guideFail }) : null,
     ),
-    wasSent
+    sentTo
       ? h('span', {
-          onClick: () => navigate('/chat?sid=' + HANDLER_SLOT),
+          onClick: () => navigate('/chat?sid=' + encodeURIComponent(sentTo)),
           style: { fontSize: 11, color: 'var(--ok, #047857)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
         }, '✓ sent — open ↗')
       : h(Fragment, null,
           item.priority !== 'fyi' || item.action
-            ? h(GhostBtn, { disabled: busy, onClick: send }, item.action ? item.action.label : 'Handle it')
+            ? h(GhostBtn, { disabled: busy || guideBusy, onClick: send }, item.action ? item.action.label : 'Handle it')
+            : null,
+          item.session
+            ? (showGuide
+                ? h('input', {
+                    placeholder: 'guidance…', disabled: guideBusy, autoFocus: true, value: guide,
+                    onChange: (e) => setGuide(e.target.value),
+                    onKeyDown: (e) => { if (e.key === 'Enter' && guide.trim()) sendGuide() },
+                    style: { background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, width: 150, outline: 'none', flexShrink: 0 },
+                  })
+                : h('button', {
+                    disabled: busy || guideBusy, onClick: () => setShowGuide(true),
+                    style: { background: 'transparent', color: MUTED, border: '1px dashed var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, cursor: 'pointer', flexShrink: 0 },
+                  }, 'guide…'))
             : null,
           item.session ? h('span', {
               onClick: () => navigate('/chat?sid=' + encodeURIComponent(item.session)),
@@ -313,11 +362,54 @@ function AgentBar({ onSent, navigate, sentFree }) {
 
 // ---------- board ----------
 
+// Bulk-approve every pending approval (slot + background). Two clicks by
+// design: bulk tool-execution approval must never happen on a slip.
+function ApproveAll({ approvals, onAction }) {
+  const [armed, setArmed] = useState(false)
+  const [run, busy, fail] = useAction(async () => {
+    for (const b of approvals) {
+      if (b.kind === 'approval') {
+        await post('/api/chat/slots/' + encodeURIComponent(b.slot.key) + '/approve', { action: 'approved', request_id: (b.info && b.info.request_id) || '' })
+      } else {
+        await post('/api/approvals/' + encodeURIComponent(b.appr.id) + '/approve')
+      }
+    }
+    setArmed(false)
+    onAction()
+  })
+  return h(Fragment, null,
+    armed
+      ? h(Fragment, null,
+          h(SolidBtn, { disabled: busy, onClick: run }, busy ? 'approving…' : 'Confirm approve all ' + approvals.length),
+          h(GhostBtn, { disabled: busy, onClick: () => setArmed(false) }, 'Cancel'),
+        )
+      : h(GhostBtn, { onClick: () => setArmed(true) }, 'Approve all ' + approvals.length),
+    fail ? h(FailNote, { fail }) : null,
+  )
+}
+
+function Pulse({ pulse }) {
+  if (!pulse || (pulse.working + pulse.waiting + pulse.stalled) === 0) return null
+  const seg = (n, label, color) => (n > 0 ? h('span', { style: { color: color || MUTED } }, n + ' ' + label) : null)
+  const parts = [
+    seg(pulse.working, 'working'),
+    seg(pulse.waiting, 'waiting on you', AIM),
+    seg(pulse.stalled, 'stalled', WARN),
+  ].filter(Boolean)
+  const joined = []
+  parts.forEach((p, i) => { if (i) joined.push(' · '); joined.push(p) })
+  return h('div', { style: { fontSize: 12, marginBottom: 6 } }, ...joined)
+}
+
 export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, sentFree, onSentFree, onRefresh, refreshBusy }) {
+  const approvals = blockers.filter((b) => b.kind === 'approval' || b.kind === 'bgApproval')
   return h('div', null,
     // Live blockers — interactive, never stale.
     blockers.length ? h('div', { style: { marginBottom: 14 } },
-      h('div', { style: { fontSize: 12, fontWeight: 600, color: AIM, marginBottom: 6 } }, 'Needs you now · ' + blockers.length),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 } },
+        h('span', { style: { fontSize: 12, fontWeight: 600, color: AIM } }, 'Needs you now · ' + blockers.length),
+        approvals.length >= 2 ? h(ApproveAll, { approvals, onAction }) : null,
+      ),
       h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 8 } },
         ...blockers.map((b) => h(BLOCKER_CARD[b.kind], { key: blockerKey(b), b, now, navigate, onAction })),
       ),
@@ -326,6 +418,7 @@ export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, 
     brief
       ? h('div', null,
           brief.headline ? h('div', { style: { fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 4 } }, brief.headline) : null,
+          h(Pulse, { pulse: brief.pulse }),
           h('div', { style: { fontSize: 11, color: brief.stale ? WARN : MUTED, marginBottom: 8 } },
             (brief.stale ? '⚠ stale — written ' : 'as of ') + rel(brief.generatedAt, now) + ' ago',
             h('span', { onClick: refreshBusy ? undefined : onRefresh, style: { marginLeft: 8, color: ACCENT, cursor: refreshBusy ? 'default' : 'pointer' } },
@@ -398,7 +491,7 @@ export default function GlanceApp() {
       : h(Board, {
           brief, blockers, now, navigate,
           onAction: poll,
-          sent, onSent: (id) => setSent((p) => ({ ...p, [id]: true })),
+          sent, onSent: (id, target) => setSent((p) => ({ ...p, [id]: target || HANDLER_SLOT })),
           sentFree, onSentFree: () => setSentFree(true),
           onRefresh: refresh, refreshBusy,
         }),

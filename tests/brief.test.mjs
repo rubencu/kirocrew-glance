@@ -104,6 +104,15 @@ test('parseBrief empty items renders as all-quiet (ok with zero items)', () => {
   assert.equal(b.items.length, 0)
 })
 
+test('parseBrief parses pulse counts; clamps garbage; null when absent or malformed', () => {
+  const withPulse = parseBrief(validBrief({ pulse: { working: 9, waiting: 2, stalled: 1 } }), NOW)
+  assert.deepEqual(withPulse.pulse, { working: 9, waiting: 2, stalled: 1 })
+  assert.equal(parseBrief(validBrief(), NOW).pulse, null)
+  assert.equal(parseBrief(validBrief({ pulse: [1, 2] }), NOW).pulse, null)
+  const garbage = parseBrief(validBrief({ pulse: { working: -3, waiting: 'many', stalled: 4000 } }), NOW)
+  assert.deepEqual(garbage.pulse, { working: 0, waiting: 0, stalled: 999 })
+})
+
 // ---------- extractBlockers ----------
 
 const slot = (over) => ({

@@ -88,6 +88,25 @@ product.
 | `tests/brief.test.mjs` | 15 unit tests over the pure logic |
 | `tests/render.test-harness.mjs` | SSR smoke: all board states render |
 
+## v2.1 — guidance at scale
+
+Feedback after running 10+ concurrent agents: the brief still narrated what
+individual agents were doing, and unblocking meant opening sessions. v2.1
+changes both sides:
+
+- **Curator**: progress and completion items are banned. An item exists only
+  when the human's input changes what happens next. Same-shaped blockers are
+  grouped into one item. Max 5 items, `now`/`soon` only. A new `pulse` field
+  carries the scale counts (`working` / `waiting` / `stalled`) so activity is
+  one line, not seven items.
+- **UI**: a pulse strip under the headline; a `guide…` input on brief items
+  and choice/plan cards that sends free text straight into the session that
+  needs steering; `Approve all N` (two-click confirm) when 2+ approvals are
+  pending. Sent-state now records where a message went so "open ↗" lands in
+  the right session.
+
+`fyi` and pulse-less briefs still parse — the schema stays `v:1`, additive.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
