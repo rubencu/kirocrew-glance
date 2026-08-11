@@ -144,3 +144,24 @@ export function handlerSlotFor(itemId) {
   const safe = String(itemId || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
   return 'glance-h-' + (safe || 'item')
 }
+
+// ---------- sent-state ----------
+
+// Sent-state persists across reloads (localStorage) so an already-delegated
+// item is not delegated twice. Entries: { [itemId]: { slot, ts } }.
+// Prune: keep only well-formed entries whose id is still in the brief and
+// younger than the TTL — resolved items must not pin storage forever.
+export const SENT_TTL_SECS = 24 * 3600
+
+export function pruneSent(sent, itemIds, now) {
+  const ids = new Set(itemIds)
+  const keep = {}
+  for (const [id, v] of Object.entries(sent && typeof sent === 'object' ? sent : {})) {
+    if (!v || typeof v !== 'object') continue
+    if (typeof v.slot !== 'string' || !v.slot) continue
+    if (typeof v.ts !== 'number' || !Number.isFinite(v.ts) || now - v.ts > SENT_TTL_SECS) continue
+    if (!ids.has(id)) continue
+    keep[id] = { slot: v.slot, ts: v.ts }
+  }
+  return keep
+}
