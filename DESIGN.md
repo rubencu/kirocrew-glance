@@ -117,6 +117,15 @@ changes both sides:
   `now` item with a previously-unseen id appeared — so a newly blocked agent
   reaches the human without the Glance tab open. Everything else stays pull.
 
+## v2.3 — sent-state survives reloads
+
+Delegation markers lived in React state, so a page reload forgot which items
+were already handed off — at 10+ agents that invites double-delegating. The
+sent map now persists to localStorage (`glance-sent-v1`) as
+`{ [itemId]: { slot, ts } }`, pruned on every brief load (`pruneSent`):
+entries whose item id left the brief or older than 24h are dropped. SSR-safe
+(localStorage guarded), storage failures degrade to session-only state.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

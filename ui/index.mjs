@@ -13,9 +13,9 @@
 //   3. One free-text line to the agent.
 import { useState, useEffect, useRef, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, rel } from './brief.mjs'
+import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.2.0'
+const VERSION = '2.3.0'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -299,7 +299,7 @@ function BriefItem({ item, navigate, sent, onSent }) {
     setShowGuide(false)
     onSent(item.id, item.session)
   })
-  const sentTo = sent[item.id]
+  const sentTo = sent[item.id] && sent[item.id].slot
   return h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 2px', borderBottom: '1px solid var(--border)', minWidth: 0 } },
     h('span', { style: { display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: PRIORITY_DOT[item.priority], flexShrink: 0, position: 'relative', top: -1 } }),
     h('div', { style: { minWidth: 0, flex: 1 } },
@@ -442,13 +442,34 @@ export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, 
 
 // ---------- root ----------
 
+// Sent-state survives reloads so an already-delegated item is not delegated
+// twice. Guarded: localStorage does not exist under SSR.
+const SENT_KEY = 'glance-sent-v1'
+
+function loadSentStore() {
+  try {
+    if (typeof localStorage === 'undefined') return {}
+    const raw = localStorage.getItem(SENT_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveSentStore(map) {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(SENT_KEY, JSON.stringify(map))
+  } catch { /* storage full/denied — sent-state degrades to session-only */ }
+}
+
 export default function GlanceApp() {
   const navigate = useNavigate()
   const [live, setLive] = useState(null)
   const [brief, setBrief] = useState(null)
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [err, setErr] = useState('')
-  const [sent, setSent] = useState({})
+  const [sent, setSent] = useState(loadSentStore)
   const [sentFree, setSentFree] = useState(false)
   const timer = useRef(null)
 
@@ -459,6 +480,14 @@ export default function GlanceApp() {
       const [lv, br] = await Promise.all([loadLive(), loadBrief(t)])
       setLive(lv)
       setBrief(br)
+      if (br) {
+        // Drop sent entries for items the curator resolved (and expired ones).
+        setSent((p) => {
+          const pruned = pruneSent(p, br.items.map((i) => i.id), t)
+          if (Object.keys(pruned).length !== Object.keys(p).length) saveSentStore(pruned)
+          return pruned
+        })
+      }
       setErr('')
     } catch (e) {
       setErr(String(e && e.message ? e.message : e))
@@ -494,7 +523,11 @@ export default function GlanceApp() {
       : h(Board, {
           brief, blockers, now, navigate,
           onAction: poll,
-          sent, onSent: (id, target) => setSent((p) => ({ ...p, [id]: target || HANDLER_SLOT })),
+          sent, onSent: (id, target) => setSent((p) => {
+            const next = { ...p, [id]: { slot: target || HANDLER_SLOT, ts: Math.floor(Date.now() / 1000) } }
+            saveSentStore(next)
+            return next
+          }),
           sentFree, onSentFree: () => setSentFree(true),
           onRefresh: refresh, refreshBusy,
         }),

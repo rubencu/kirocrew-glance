@@ -45,7 +45,7 @@ assert.equal(blockers.length, 5, 'question, approval, plan, choice, bgApproval')
 const noop = () => {}
 const html = renderToStaticMarkup(h(Board, {
   brief, blockers, now: NOW, navigate: noop, onAction: noop,
-  sent: { done: 'glance-handler' }, onSent: noop, sentFree: false, onSentFree: noop,
+  sent: { done: { slot: 'glance-handler', ts: NOW - 30 } }, onSent: noop, sentFree: false, onSentFree: noop,
   onRefresh: noop, refreshBusy: false,
 }))
 

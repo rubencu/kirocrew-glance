@@ -2,7 +2,7 @@
 // blocker extraction. Run: node --test tests/
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { toEpoch, rel, parseBrief, extractBlockers, blockerKey, handlerSlotFor, STALE_AFTER } from '../ui/brief.mjs'
+import { toEpoch, rel, parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, STALE_AFTER, SENT_TTL_SECS } from '../ui/brief.mjs'
 
 const NOW = 1_800_000_000
 
@@ -111,6 +111,22 @@ test('handlerSlotFor: stable, sanitized, clamped per-item slots', () => {
   assert.equal(handlerSlotFor(''), 'glance-h-item')
   assert.equal(handlerSlotFor(null), 'glance-h-item')
   assert.ok(handlerSlotFor('x'.repeat(100)).length <= 'glance-h-'.length + 32)
+})
+
+test('pruneSent keeps live+fresh entries, drops resolved/expired/malformed', () => {
+  const sent = {
+    live: { slot: 'glance-h-live', ts: NOW - 60 },            // kept
+    resolved: { slot: 'glance-h-resolved', ts: NOW - 60 },    // dropped: id gone from brief
+    expired: { slot: 'glance-h-expired', ts: NOW - SENT_TTL_SECS - 1 }, // dropped: too old
+    noSlot: { ts: NOW },                                      // dropped: malformed
+    badTs: { slot: 'x', ts: 'yesterday' },                    // dropped: malformed
+  }
+  const out = pruneSent(sent, ['live', 'expired', 'noSlot', 'badTs'], NOW)
+  assert.deepEqual(Object.keys(out), ['live'])
+  assert.deepEqual(out.live, { slot: 'glance-h-live', ts: NOW - 60 })
+  // garbage input degrades to empty, never throws
+  assert.deepEqual(pruneSent(null, ['a'], NOW), {})
+  assert.deepEqual(pruneSent('nope', ['a'], NOW), {})
 })
 
 test('parseBrief parses pulse counts; clamps garbage; null when absent or malformed', () => {
