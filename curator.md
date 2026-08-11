@@ -103,5 +103,18 @@ Rules:
   nothing needs you.", the `pulse` counts, and a `quiet` line with the idle
   count.
 
-Then stop. Do not send notifications, do not start monitors, do not do the
+## 4. Notify — only on a NEW `now` item
+
+Compare against the previous brief you read in step 2. If (and only if) this
+run produced a `now` item whose `id` was NOT in the previous brief's items,
+publish ONE bell notification via the `send_notification` tool: title
+"Glance: needs you", body = the new item texts (joined, <=200 chars), normal
+priority, link to `/glance`. Rules:
+
+- At most one notification per run, covering all new `now` items together.
+- Never notify for `soon` items, re-worded existing items (same id), the
+  first brief ever written, or an all-quiet brief.
+- If `send_notification` is unavailable, skip silently.
+
+Then stop. Do not send chat messages, do not start monitors, do not do the
 work the items describe.
