@@ -1,8 +1,8 @@
 {
   "name": "glance",
   "displayName": "Glance",
-  "version": "2.0.0",
-  "description": "Agent-curated brief of everything in flight: an LLM curator triages your sessions and writes what matters; the UI is one glance and one reply.",
+  "version": "2.1.0",
+  "description": "Agent-curated brief for running many agents at once: the curator surfaces only where your guidance is needed, and every card takes a reply inline — no per-agent reading required.",
   "author": "rubencu",
   "tags": ["sessions", "triage", "productivity", "attention", "agentic"],
   "permissions": {

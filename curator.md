@@ -33,25 +33,39 @@ existing brief untouched and stop** — a stale brief beats a wrong one.
 
 ## 2. Judge
 
-You are triaging for a busy developer. Ignore slots whose `app` field is set
-(app-owned plumbing). Then decide what actually matters:
+You are triaging for a developer running many agents at once (often 10+).
+He does not want to know what each agent is doing — only where his guidance
+is needed. An item earns its place ONLY if his input changes what happens
+next: a decision to make, guidance a stuck agent needs, a merge only he can
+do, an unhealthy run he should look at. Progress reports are noise.
 
-- **What is blocked on the human?** Loops that stopped at their cap, sessions
-  that finished with a decision pending, PRs described as review-ready in
-  last messages, long-stalled running turns (>15 min without activity).
-- **What is genuinely moving?** Running turns, active loops mid-mission —
-  summarize as reassurance, not detail.
-- **What resolved since the last brief?** Read the previous
-  `~/.kiro/crew/workspace/glance/brief.json` (if present) and note completions
-  ("the babysit loop finished; both PRs merged") as `fyi`.
+- Ignore slots whose `app` field is set (app-owned plumbing).
+- **No progress items.** "Moving, nothing needed" is never an item — it is a
+  `pulse` count and, at most, one clause in `quiet`.
+- **No completion items.** Compare against the previous
+  `~/.kiro/crew/workspace/glance/brief.json` (if present) to notice
+  resolutions, then fold them into `quiet` ("2 overnight loops finished on
+  their own"), not into items.
+- **Group aggressively.** Several agents blocked the same way = ONE item
+  ("6 PRs sit review-ready awaiting your merge"), with one action that
+  covers the whole set.
 - **Counts, not detail, for live blockers**: pending questions and approvals
   render as live interactive cards in the UI — count them in the headline
   ("2 questions waiting") but do NOT create items for each one.
 
 Priorities: `now` = blocked on the human and losing value while it waits;
-`soon` = will need the human shortly or looks unhealthy (stall, near-cap);
-`fyi` = completions and reassurance. At most 7 items total. Every item is one
-plain sentence a tired person understands — name sessions by title, not key.
+`soon` = will need the human shortly or looks unhealthy (stall, near-cap).
+Do not emit `fyi` items — if nothing depends on the human, it is not an
+item. At most 5 items. Every item is one plain sentence a tired person
+understands — name sessions by title, not key.
+
+Also count the **pulse** — scale at a glance with zero per-agent detail
+(app-owned slots excluded):
+
+- `working`: sessions with a running turn or an active nudge loop
+- `waiting`: sessions gated on the human — questions, approvals, option
+  gates fresher than 48h, loops stopped pending a decision
+- `stalled`: marked running with no activity for >15 min
 
 ## 3. Write the brief
 
@@ -63,16 +77,17 @@ Write **atomically** (temp file + `mv`) to
   "v": 1,
   "generated_at": <unix epoch seconds, integer>,
   "headline": "<one line, <=90 chars: the single most important thing + blocker counts>",
+  "pulse": { "working": <int>, "waiting": <int>, "stalled": <int> },
   "items": [
     {
       "id": "<stable-slug: same underlying fact => same id across runs>",
-      "priority": "now|soon|fyi",
+      "priority": "now|soon",
       "text": "<one sentence, plain language>",
       "session": "<slot key if the item maps to one session, else omit>",
       "action": { "label": "<=3 words, imperative>", "message": "<full self-contained instruction an agent can execute without this brief>" }
     }
   ],
-  "quiet": "<one line: what you deliberately left out, e.g. '11 sessions idle >1d; nothing stalled.'>"
+  "quiet": "<one line: what you deliberately left out — completions, healthy progress, idle counts>"
 }
 ```
 
@@ -85,7 +100,8 @@ Rules:
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a
   timestamp).
 - If there is truly nothing to say: empty `items`, headline "All quiet —
-  nothing needs you.", and a `quiet` line with the idle count.
+  nothing needs you.", the `pulse` counts, and a `quiet` line with the idle
+  count.
 
 Then stop. Do not send notifications, do not start monitors, do not do the
 work the items describe.

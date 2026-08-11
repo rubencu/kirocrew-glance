@@ -14,6 +14,7 @@ const brief = parseBrief(JSON.stringify({
   v: 1,
   generated_at: NOW - 240,
   headline: 'PR #2431 only needs your merge; 1 question waiting.',
+  pulse: { working: 9, waiting: 2, stalled: 1 },
   items: [
     { id: 'pr-2431', priority: 'now', text: 'PR #2431 has been review-ready for 9h — only needs your merge.', session: 'pr-babysit', action: { label: 'Merge it', message: 'Merge PR #2431.' } },
     { id: 'stall', priority: 'soon', text: 'Exit-gate session looks stalled 40m on a failing test.', session: 'exit-gate' },
@@ -44,17 +45,20 @@ assert.equal(blockers.length, 5, 'question, approval, plan, choice, bgApproval')
 const noop = () => {}
 const html = renderToStaticMarkup(h(Board, {
   brief, blockers, now: NOW, navigate: noop, onAction: noop,
-  sent: { done: true }, onSent: noop, sentFree: false, onSentFree: noop,
+  sent: { done: 'glance-handler' }, onSent: noop, sentFree: false, onSentFree: noop,
   onRefresh: noop, refreshBusy: false,
 }))
 
 const mustContain = [
   'Needs you now · 5',
+  'Approve all 2',                                        // bulk unblock (slot + bg approval)
   // brief
   'PR #2431 only needs your merge',                       // headline
+  '9 working', '2 waiting on you', '1 stalled',           // pulse strip
   'as of 4m ago', '↻ refresh',                            // freshness + refresh
   'review-ready for 9h', 'Merge it',                      // now item + curated action
   'stalled 40m', 'Handle it',                             // soon item + generic delegation
+  'guide…',                                               // per-session guidance affordance
   'Overnight babysit loop finished',                      // fyi item
   '✓ sent — open ↗',                                      // sent state (item id 'done')
   '11 sessions idle',                                     // quiet line
