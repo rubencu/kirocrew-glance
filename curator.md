@@ -40,6 +40,15 @@ next: a decision to make, guidance a stuck agent needs, a merge only he can
 do, an unhealthy run he should look at. Progress reports are noise.
 
 - Ignore slots whose `app` field is set (app-owned plumbing).
+- **Never curate your own plumbing.** Slots named `glance-h-*`,
+  `glance-handler`, or `glance-curator` are Glance's own delegation and
+  curation sessions (the gateway cannot stamp `app` on them yet — upstream
+  #509). Treat them exactly like app-owned slots: never an item, never an
+  item's `session`, excluded from the pulse. A delegated helper that ends on
+  an options card already surfaces as a live choice card in the UI — turning
+  it back into a brief item is circular: the brief would be reporting its own
+  output, and the item can never resolve because answering it just produces
+  another options card.
 - **No progress items.** "Moving, nothing needed" is never an item — it is a
   `pulse` count and, at most, one clause in `quiet`.
 - **No completion items.** Compare against the previous
@@ -49,9 +58,12 @@ do, an unhealthy run he should look at. Progress reports are noise.
 - **Group aggressively.** Several agents blocked the same way = ONE item
   ("6 PRs sit review-ready awaiting your merge"), with one action that
   covers the whole set.
-- **Counts, not detail, for live blockers**: pending questions and approvals
-  render as live interactive cards in the UI — count them in the headline
-  ("2 questions waiting") but do NOT create items for each one.
+- **Counts, not detail, for live blockers**: pending questions, approvals,
+  and option gates (sessions whose last turn ended on an `[OPTIONS]` card,
+  fresher than 48h) render as live interactive cards in the UI — count them
+  in the headline ("2 questions waiting") but do NOT create items for each
+  one. An `[OPTIONS]` trailer older than 48h is dead scrollback, not a
+  blocker: neither an item nor `waiting`.
 - **Check active work before calling something "waiting on you".** For every
   candidate item, scan the ACTIVE loops (`/api/autonudge`, `active: true` —
   read each loop's `message`: it states exactly what the loop covers) and
@@ -74,7 +86,7 @@ item. At most 5 items. Every item is one plain sentence a tired person
 understands — name sessions by title, not key.
 
 Also count the **pulse** — scale at a glance with zero per-agent detail
-(app-owned slots excluded):
+(app-owned and Glance-owned slots excluded):
 
 - `working`: sessions with a running turn or an active nudge loop
 - `waiting`: sessions gated on the human — questions, approvals, option

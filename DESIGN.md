@@ -143,6 +143,29 @@ item carry over unexamined. Two new Judge rules:
 - Carried-over ids are re-judged against current live state every run;
   stable ids are for UI dedup, not for keeping items alive.
 
+## v2.3.2 — the curator must not report its own output
+
+Observed miss: a brief item ("summary of your four unanswered threads is
+ready in a session with an options card") pointed at
+`glance-h-stale-user-followups` — Glance's OWN delegation slot, created when
+the human clicked a previous item's action button. The helper finished with
+a summary and an `[OPTIONS]` trailer; the curator then saw a session gated
+on the human and itemized it. Circular: the item's subject was the brief's
+own delegated output, the UI already rendered that options card live at the
+top of the board, and re-judging (v2.3.1) could never kill it because the
+session genuinely stays gated forever. Two new Judge rules:
+
+- `glance-h-*` / `glance-handler` / `glance-curator` slots are Glance's own
+  plumbing — never an item, never an item's `session`, excluded from pulse
+  (the `app` field can't be stamped on them yet; upstream #509).
+- Option gates joined questions and approvals in the "live cards, counts
+  only" rule: a fresh `[OPTIONS]` trailer is a live choice card the UI
+  already shows, so it is counted, never itemized; one older than 48h is
+  dead scrollback — neither an item nor `waiting`.
+
+Also bumped the UI header's hardcoded `VERSION` (stuck at 2.3.0 since the
+2.3.1 release).
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
