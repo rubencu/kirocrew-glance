@@ -126,6 +126,23 @@ sent map now persists to localStorage (`glance-sent-v1`) as
 entries whose item id left the brief or older than 24h are dropped. SSR-safe
 (localStorage guarded), storage failures degrade to session-only state.
 
+## v2.3.1 — items must survive an active-work cross-check
+
+Observed miss: the brief kept a "PR #2713 needs your fix-or-close call" item
+alive after the human had already answered — his decision was baked into an
+active babysit loop's goal message ("hard caps armed … close and file, no
+asking"), and a fix agent was dispatched. The curator had the evidence in
+hand (`/api/autonudge` returns each loop's full goal message) but the Judge
+step never told it to look, and the stable-id rule let the previous brief's
+item carry over unexamined. Two new Judge rules:
+
+- Before emitting an item, scan active loops and running sessions for the
+  item's subject (PR/issue number, session title). Covered by active work —
+  including a pre-authorized decision inside a loop's mandate — means it is
+  `working`, not "waiting on you".
+- Carried-over ids are re-judged against current live state every run;
+  stable ids are for UI dedup, not for keeping items alive.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

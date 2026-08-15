@@ -52,6 +52,20 @@ do, an unhealthy run he should look at. Progress reports are noise.
 - **Counts, not detail, for live blockers**: pending questions and approvals
   render as live interactive cards in the UI — count them in the headline
   ("2 questions waiting") but do NOT create items for each one.
+- **Check active work before calling something "waiting on you".** For every
+  candidate item, scan the ACTIVE loops (`/api/autonudge`, `active: true` —
+  read each loop's `message`: it states exactly what the loop covers) and
+  running sessions for the item's subject (PR number, issue id, session
+  title). If an active loop or running session already covers that subject —
+  including a decision pre-authorized inside a loop's goal ("hard cap armed",
+  "no asking", standing instructions naming that exact PR) — then the human's
+  input does NOT change what happens next: agents are already on it. That is
+  `working`, never an item; at most one clause in `quiet`.
+- **Carried-over items must re-earn their place every run.** Stable ids exist
+  so the UI can dedup, not to keep items alive. Re-judge every id from the
+  previous brief against CURRENT live state exactly like a new candidate; if
+  the blocker has since been dispatched to an agent or absorbed into an
+  active loop's mandate, drop the item (fold into `quiet` if worth a clause).
 
 Priorities: `now` = blocked on the human and losing value while it waits;
 `soon` = will need the human shortly or looks unhealthy (stall, near-cap).
