@@ -166,6 +166,20 @@ session genuinely stays gated forever. Two new Judge rules:
 Also bumped the UI header's hardcoded `VERSION` (stuck at 2.3.0 since the
 2.3.1 release).
 
+## v2.3.3 — grouped actions must stay coherent
+
+Observed miss: the curator compressed two unrelated dropped requests into a
+single "Resume both" item. That saved one card but sent different repositories,
+expertise, and success checks into one helper slot. The UI could then only say
+that the combined item was sent; it could not show which workstream had
+finished, retry one independently, or let both run in parallel.
+
+Grouping now requires one shared decision or instruction. The curator applies a
+concrete test: if one short, self-contained action cannot resolve every member
+without becoming a numbered multi-task checklist, the subjects remain separate
+items (within the five-item cap). Similar status alone — "dropped," "old," or
+"unhealthy" — is not a reason to bundle unrelated work.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

@@ -55,9 +55,16 @@ do, an unhealthy run he should look at. Progress reports are noise.
   `~/.kiro/crew/workspace/glance/brief.json` (if present) to notice
   resolutions, then fold them into `quiet` ("2 overnight loops finished on
   their own"), not into items.
-- **Group aggressively.** Several agents blocked the same way = ONE item
-  ("6 PRs sit review-ready awaiting your merge"), with one action that
-  covers the whole set.
+- **Group only coherent work.** Several agents blocked on the SAME decision or
+  instruction = ONE item ("6 PRs sit review-ready awaiting your merge"), with
+  one action that covers the whole set. A shared category is not enough:
+  "two dropped threads," "three old requests," or "four unhealthy runs" may
+  contain unrelated subjects and must stay separate when they need different
+  instructions, repositories, expertise, or success checks. Use this test:
+  could one short, self-contained `action.message` resolve every member
+  without becoming a numbered multi-task checklist? If not, emit separate
+  items/actions (within the 5-item cap), ordered by value. Never bundle
+  unrelated work merely to reduce card count.
 - **Counts, not detail, for live blockers**: pending questions, approvals,
   and option gates (sessions whose last turn ended on an `[OPTIONS]` card,
   fresher than 48h) render as live interactive cards in the UI — count them
