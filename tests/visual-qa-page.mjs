@@ -14,9 +14,10 @@ const brief = parseBrief(JSON.stringify({
   headline: '11 review-ready PRs wait on your merge; one test run silent 1.6h.',
   pulse: { working: 9, waiting: 4, stalled: 1 },
   items: [
-    { id: 'campaign-merge', priority: 'now', text: "The memory-protection campaign's 5 PRs are review-ready and blocked on your merge alone.", session: 'chat-37', action: { label: 'Summarize them', message: 'Summarize the campaign PRs.' } },
+    { id: 'campaign-merge', priority: 'now', text: "The memory-protection campaign's 5 PRs are review-ready and blocked on your merge alone.", session: 'chat-37', since: NOW - 32400, action: { label: 'Summarize them', message: 'Summarize the campaign PRs.' } },
+    { id: 'decide-history', priority: 'now', text: 'Conflicted PR #4487 waits on your history-strategy pick — its monitor may not rewrite history, so only your call ends the wait.', session: 'chat-89', since: NOW - 90000, choices: ['Squash with force-with-lease', 'Fresh single-commit PR', 'Leave it'] },
     { id: 'pr-backlog', priority: 'now', text: 'Six more PRs from other workstreams are also review-ready awaiting your merge.', action: { label: 'List them', message: 'List the review-ready PRs.' } },
-    { id: 'test-stall', priority: 'soon', text: "'Skills Approved But Notifications Persist' has been silent ~1.6 hours on the full test suite.", session: 'chat-55' },
+    { id: 'test-stall', priority: 'soon', text: "'Skills Approved But Notifications Persist' has been silent ~1.6 hours on the full test suite.", session: 'chat-55', since: NOW - 5760 },
   ],
   quiet: 'Left out: 3 healthy babysit loops, ~40 idle sessions, day-old option trailers; 0 approvals.',
 }), NOW)
