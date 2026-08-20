@@ -180,6 +180,25 @@ without becoming a numbered multi-task checklist, the subjects remain separate
 items (within the five-item cap). Similar status alone — "dropped," "old," or
 "unhealthy" — is not a reason to bundle unrelated work.
 
+## v2.3.4 — external gates are not "needs you now"
+
+Observed miss: the brief's only `now` item said a fork PR's CI was blocked on
+an upstream maintainer's "Approve and run workflows" click. The human has
+read-only access upstream and cannot perform that click, and a monitor loop
+was already polling the PR. The card claimed the top urgency slot, offered no
+action, and nothing the human did could change what happened next — a
+progress report wearing a `now` badge.
+
+The priority model only knew two states: blocked-on-human (`now`) and
+needs-human-soon (`soon`). Work blocked on a third party fit neither, so the
+curator promoted it by importance instead of by actionability. New Judge
+rule: `now` requires naming the human's concrete move that ends the wait.
+An externally-gated item is `working` while agents cover it; once the
+external wait passes ~24h it may surface as ONE `soon` escalation card whose
+action is the move an agent can actually execute (post a status comment on
+the PR requesting workflow approval, look for an alternate reviewer). An
+action-less card for an external gate is never emitted.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

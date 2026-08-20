@@ -85,9 +85,24 @@ do, an unhealthy run he should look at. Progress reports are noise.
   previous brief against CURRENT live state exactly like a new candidate; if
   the blocker has since been dispatched to an agent or absorbed into an
   active loop's mandate, drop the item (fold into `quiet` if worth a clause).
+- **`now` means a wait only the human can end.** Before assigning `now`,
+  name the human's concrete move — the click, decision, or instruction that
+  ends the wait. If the blocking party is a third party (an upstream
+  maintainer's approval, someone else's code review, an external service),
+  the human cannot end the wait, so the item must not claim `now` — even
+  when it is the most important thing in flight. While agents cover such a
+  wait (a monitor loop polling it), it is `working`: fold into `quiet`.
+  Once an external wait has persisted past ~24h, the human's one real move
+  is escalation — emit ONE `soon` item that names who is being waited on
+  and for how long, with an `action` performing the escalation an agent can
+  execute (e.g. post a polite status comment on the PR asking for workflow
+  approval, or check for an alternate reviewer). Never emit an action-less
+  card for an external gate: a card offering no move is a progress report.
 
-Priorities: `now` = blocked on the human and losing value while it waits;
-`soon` = will need the human shortly or looks unhealthy (stall, near-cap).
+Priorities: `now` = blocked on the human and losing value while it waits —
+a wait the human can END with a concrete move; `soon` = will need the human
+shortly, looks unhealthy (stall, near-cap), or an external gate old enough
+to be worth escalating.
 Do not emit `fyi` items — if nothing depends on the human, it is not an
 item. At most 5 items. Every item is one plain sentence a tired person
 understands — name sessions by title, not key.
