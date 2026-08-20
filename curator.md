@@ -156,7 +156,8 @@ Write **atomically** (temp file + `mv`) to
       "text": "<one sentence, plain language>",
       "session": "<slot key if the item maps to one session, else omit>",
       "action": { "label": "<=3 words, imperative>", "message": "<full self-contained instruction an agent can execute without this brief>" },
-      "choices": ["<short answer in the human's voice>", "..."]
+      "choices": ["<short answer in the human's voice>", "..."],
+      "since": <unix epoch seconds when this blocker started waiting, integer>
     }
   ],
   "quiet": "<one line: what you deliberately left out — completions, healthy progress, idle counts>"
@@ -188,6 +189,14 @@ Rules:
   your own. Emit `choices` only with a `session`. A decision item with
   `choices` should not also carry an `action`: a decision is answered,
   not delegated.
+- `since` says when the underlying blocker STARTED waiting, so the UI can
+  show age (a 6-hour nag must not look like a fresh blocker). For a new
+  item, take it from evidence when the state you read carries a timestamp
+  (the slot's `last_activity_ts` when the gate is that session's silence,
+  a question/approval `ts`); otherwise use this run's time. For a
+  carried-over item (same `id` in the previous brief), KEEP the previous
+  brief's `since` unchanged — the blocker did not restart because the
+  brief regenerated. Omit it only when genuinely unknowable.
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a
   timestamp).
 - If there is truly nothing to say: empty `items`, headline "All quiet —

@@ -292,6 +292,24 @@ carry exactly the claim the text carries — and grants no authority
 upgrade. The item must still re-earn its place every run; when it drops
 or is re-keyed, its choices die with it.
 
+## v2.5.0 — items carry their age
+
+Observed gap: all three live items had been on the board for ~3 hours, but
+neither the schema nor the UI carried that fact — every card rendered as
+if freshly minted. The live-blocker cards below the brief already show
+wait ages ("QUESTION · 15m"); the brief items, the top of the board, had
+no age dimension. On a triage surface age is salience: a 6-hour nag and a
+5-minute blocker must not look identical.
+
+Items gain an optional `since` (epoch when the underlying blocker started
+waiting). New items take it from evidence timestamps when the state read
+carries one, else the run's time; carried-over ids keep the previous
+brief's value unchanged — a blocker does not restart because the brief
+regenerated. The UI appends a muted "· waiting 6h" chip after the item
+text once the wait exceeds one curator cycle (15 min), in the same
+language as the live-card wait pills. Future-dated values clamp to
+`generated_at` so an age can never render negative.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

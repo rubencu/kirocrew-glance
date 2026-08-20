@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, createElement as h, Fragment } from 'react
 import { useNavigate } from '@kirocrew/app-sdk'
 import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.4.1'
+const VERSION = '2.5.0'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -278,7 +278,7 @@ const BLOCKER_CARD = { question: QuestionCard, approval: ApprovalCard, bgApprova
 
 // ---------- the brief ----------
 
-function BriefItem({ item, navigate, sent, onSent }) {
+function BriefItem({ item, navigate, sent, onSent, now }) {
   const [guide, setGuide] = useState('')
   const [showGuide, setShowGuide] = useState(false)
   const [send, busy, fail] = useAction(async () => {
@@ -312,6 +312,12 @@ function BriefItem({ item, navigate, sent, onSent }) {
     h('span', { style: { display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: PRIORITY_DOT[item.priority], flexShrink: 0, position: 'relative', top: -1 } }),
     h('div', { style: { minWidth: 0, flex: 1 } },
       h('span', { style: { fontSize: 13, color: 'var(--text)' } }, item.text),
+      // Age = salience on a triage board: a 6-hour nag must not look like a
+      // fresh blocker. Shown once the wait exceeds one curator cycle, in the
+      // same language as the live-card wait pills.
+      item.since && now - item.since >= 900
+        ? h('span', { style: { fontSize: 10, color: MUTED, whiteSpace: 'nowrap' } }, ' · waiting ' + rel(item.since, now))
+        : null,
       fail || guideFail || choiceFail ? h(FailNote, { fail: fail || guideFail || choiceFail }) : null,
     ),
     sentTo
@@ -441,7 +447,7 @@ export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, 
               refreshBusy ? 'refreshing…' : '↻ refresh'),
           ),
           brief.items.length
-            ? h('div', null, ...brief.items.map((it) => h(BriefItem, { key: it.id, item: it, navigate, sent, onSent })))
+            ? h('div', null, ...brief.items.map((it) => h(BriefItem, { key: it.id, item: it, navigate, sent, onSent, now })))
             : h('div', { style: { fontSize: 13, color: MUTED, padding: '10px 0' } }, 'All quiet — nothing needs you.'),
           brief.quiet ? h('div', { style: { fontSize: 11, color: MUTED, marginTop: 8 } }, brief.quiet) : null,
         )

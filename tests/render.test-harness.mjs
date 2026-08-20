@@ -16,7 +16,7 @@ const brief = parseBrief(JSON.stringify({
   headline: 'PR #2431 only needs your merge; 1 question waiting.',
   pulse: { working: 9, waiting: 2, stalled: 1 },
   items: [
-    { id: 'pr-2431', priority: 'now', text: 'PR #2431 has been review-ready for 9h — only needs your merge.', session: 'pr-babysit', action: { label: 'Merge it', message: 'Merge PR #2431.' } },
+    { id: 'pr-2431', priority: 'now', text: 'PR #2431 has been review-ready for 9h — only needs your merge.', session: 'pr-babysit', since: NOW - 32400, action: { label: 'Merge it', message: 'Merge PR #2431.' } },
     { id: 'decide-history', priority: 'now', text: 'Conflicted PR waits on your history-strategy pick.', session: 'monitor-slot', choices: ['Squash it', 'Fresh PR', 'Leave it'] },
     { id: 'stall', priority: 'soon', text: 'Exit-gate session looks stalled 40m on a failing test.', session: 'exit-gate' },
     { id: 'done', priority: 'fyi', text: 'Overnight babysit loop finished: both PRs merged.' },
@@ -58,6 +58,7 @@ const mustContain = [
   '9 working', '2 waiting on you', '1 stalled',           // pulse strip
   'as of 4m ago', '↻ refresh',                            // freshness + refresh
   'review-ready for 9h', 'Merge it',                      // now item + curated action
+  '· waiting 9h',                                         // item wait-age chip (since)
   'Squash it', 'Fresh PR', 'Leave it',                    // decision item: one-click choices
   'stalled 40m', 'Handle it',                             // soon item + generic delegation
   'guide…',                                               // per-session guidance affordance

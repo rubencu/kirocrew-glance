@@ -69,6 +69,9 @@ export function parseBrief(raw, now) {
       session,
       action,
       choices,
+      // When the underlying blocker started waiting (0 = unknown). Clamped to
+      // generated_at so a garbage future value cannot render a negative age.
+      since: Math.min(toEpoch(it.since), generatedAt) || 0,
     })
   }
   // now first, then soon, then fyi; stable within a priority (curator's order).
