@@ -98,6 +98,15 @@ do, an unhealthy run he should look at. Progress reports are noise.
   execute (e.g. post a polite status comment on the PR asking for workflow
   approval, or check for an alternate reviewer). Never emit an action-less
   card for an external gate: a card offering no move is a progress report.
+- **Attribute the blocker from evidence, never from assumption.** Who can
+  end a wait must come from the live state you read — the covering
+  session's or loop's own words (title, goal message, last message) or the
+  previous brief's finding. If that evidence names a third party ("blocked
+  on maintainer approval", "cannot self-approve"), believe it: do not
+  re-attribute the wait to the human to justify a `now`. If the evidence is
+  ambiguous about who holds the key, treat the gate as external — the
+  weaker claim. A wrongly-demoted item costs one late escalation card; a
+  false "your click" trains the human to distrust every `now`.
 
 Priorities: `now` = blocked on the human and losing value while it waits —
 a wait the human can END with a concrete move; `soon` = will need the human
