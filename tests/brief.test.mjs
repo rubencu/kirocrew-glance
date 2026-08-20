@@ -87,6 +87,36 @@ test('parseBrief drops invalid items, normalizes priority, clamps to 10', () => 
   assert.ok(!b.items.some((i) => i.id === 'y'))
 })
 
+test('parseBrief parses decision choices: trimmed, clamped, session-gated', () => {
+  const items = [
+    { id: 'dec', priority: 'now', text: 'Pick a strategy.', session: 'chat-9',
+      choices: ['  Squash with force-with-lease ', 'Fresh single-commit PR', 'Leave it', '', 42, 'x'.repeat(80), 'fifth', 'sixth'] },
+    { id: 'no-sess', priority: 'now', text: 'Choices without a session.', choices: ['A', 'B'] },
+    { id: 'no-choices', priority: 'soon', text: 'Plain item.', session: 'chat-3' },
+  ]
+  const b = parseBrief(validBrief({ items }), NOW)
+  assert.equal(b.ok, true)
+  const dec = b.items.find((i) => i.id === 'dec')
+  // trimmed, empties/non-strings dropped, each clamped to 60, max 4 kept
+  assert.deepEqual(dec.choices.slice(0, 3), ['Squash with force-with-lease', 'Fresh single-commit PR', 'Leave it'])
+  assert.equal(dec.choices.length, 4)
+  assert.equal(dec.choices[3].length, 60)
+  // choices are guidance into the item's session — dropped without one
+  assert.deepEqual(b.items.find((i) => i.id === 'no-sess').choices, [])
+  assert.deepEqual(b.items.find((i) => i.id === 'no-choices').choices, [])
+})
+
+test('parseBrief choices tolerate malformed shapes', () => {
+  const items = [
+    { id: 'obj', priority: 'now', text: 'Object, not array.', session: 's1', choices: { a: 1 } },
+    { id: 'null', priority: 'now', text: 'Null choices.', session: 's2', choices: null },
+  ]
+  const b = parseBrief(validBrief({ items }), NOW)
+  assert.equal(b.ok, true)
+  assert.deepEqual(b.items.find((i) => i.id === 'obj').choices, [])
+  assert.deepEqual(b.items.find((i) => i.id === 'null').choices, [])
+})
+
 test('parseBrief orders now → soon → fyi, stable within priority', () => {
   const items = [
     { id: 'f1', priority: 'fyi', text: 'fyi first' },

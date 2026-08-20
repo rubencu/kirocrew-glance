@@ -253,6 +253,27 @@ how long the silence. `stalled` is reserved for unexplained silence or
 visible distress. A coherence rule backs it: never publish a count your
 own `quiet` line argues against.
 
+## v2.4.0 — decisions are answered, not delegated
+
+Observed miss, from a visual QA pass rendering the live brief through the
+real Board: the top `now` card said "only your call ends the wait" and
+named the three options in its own prose (squash with force-with-lease,
+fresh single-commit PR, leave it) — yet its affordances were "Handle it",
+which spawns a helper agent to make a decision only the human can make,
+and a free-text guide box requiring the human to retype a choice the
+curator had already written out. The schema had no way to hand the
+decision's options to the UI.
+
+Items gain an optional `choices` field: 2–4 short answers in the human's
+voice, valid only alongside a `session`. The UI renders each as a
+one-click button that sends the label verbatim as guidance to the item's
+own session — clicking one is the human answering the waiting agent's
+question, the same routing as guide… with the typing removed. Choices
+displace the delegate button on decision items; freeform guide… stays.
+The curator may only list options the waiting agent itself offered (its
+options trailer, its question, its last message) — never invented
+alternatives, never a destructive addition of its own.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
