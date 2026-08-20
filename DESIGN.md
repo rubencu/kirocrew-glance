@@ -199,6 +199,24 @@ action is the move an agent can actually execute (post a status comment on
 the PR requesting workflow approval, look for an alternate reviewer). An
 action-less card for an external gate is never emitted.
 
+## v2.3.5 — blocker attribution must come from evidence
+
+Observed miss, on the first run under v2.3.4: the same external-gate item
+survived as `now` by flipping its attribution. The previous brief said the
+wait was on "the maintainer's 'Approve and run workflows' click — someone
+with write access"; the new run, judging identical live state, re-worded it
+to "your 'Approve and run workflows' click". The v2.3.4 rule made
+attribution load-bearing (`now` requires a move the human can make) but
+gave no discipline for where attribution comes from, so the curator guessed
+the flattering version.
+
+New Judge rule: who can end a wait must come from the live evidence — the
+covering session's or loop's own words, or the previous brief's finding.
+Evidence naming a third party is believed, not re-attributed. Ambiguity
+resolves to external (the weaker claim): a wrongly-demoted item costs one
+late escalation card, while a false "your click" teaches the human to
+distrust every `now`.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
