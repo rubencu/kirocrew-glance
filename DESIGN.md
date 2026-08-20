@@ -377,6 +377,23 @@ its stable id, so the moment it became a demand on the human never rang
 the bell. Stable ids exist for UI dedup; the predicate now keys on
 newly-`now` (new id, or same id escalated from `soon`).
 
+## v2.5.5 — the id names the blocker, not the framing
+
+Observed miss, first wake of the 4-hour cadence: the curator re-judged the
+#4487 decision card into an escalation card — a correct demotion under the
+attribution rules (the monitor's heartbeats never restate who holds the
+key, so ambiguity resolved to external) — but re-keyed it
+(`pr-4487-history-strategy` → `pr-4487-wait-escalation`) while carrying
+its `since` verbatim. Carrying the clock asserts "same underlying fact";
+minting a fresh id asserts "different fact." The re-key silently broke the
+UI's sent-state dedup, killed the id-matched carry-over path for
+`choices`, and would make the bell treat a 31-hour-old wait as brand new.
+
+The id-stability rule now binds the id to the UNDERLYING BLOCKER rather
+than the curator's current framing: re-judging changes priority, text,
+action, and choices — never the id — and copying a previous item's `since`
+obliges keeping its id. New ids are for genuinely different blockers.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
