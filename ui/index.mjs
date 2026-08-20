@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, createElement as h, Fragment } from 'react
 import { useNavigate } from '@kirocrew/app-sdk'
 import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.5.0'
+const VERSION = '2.5.1'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'

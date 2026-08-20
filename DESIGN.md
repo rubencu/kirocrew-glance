@@ -310,6 +310,20 @@ text once the wait exceeds one curator cycle (15 min), in the same
 language as the live-card wait pills. Future-dated values clamp to
 `generated_at` so an age can never render negative.
 
+## v2.5.1 — a missing clock self-heals
+
+Observed on the first two v2.5.0 runs: the decision item got an
+evidence-grade `since` (the real ~25h-old timestamp, held stable across
+runs), but the two items predating the field stayed clock-less — and the
+carry-over rule as written kept them clock-less forever, since each run
+faithfully carried the previous run's omission. Any future run that
+dropped the field once would have the same permanent effect.
+
+Amendment: when a carried item's previous entry has no `since`, backfill
+it now — from evidence, else the run's time — instead of carrying the
+omission forward. A late-started clock understates the wait; no clock
+hides it.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

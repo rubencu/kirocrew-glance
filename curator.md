@@ -196,7 +196,10 @@ Rules:
   a question/approval `ts`); otherwise use this run's time. For a
   carried-over item (same `id` in the previous brief), KEEP the previous
   brief's `since` unchanged — the blocker did not restart because the
-  brief regenerated. Omit it only when genuinely unknowable.
+  brief regenerated. If the previous entry has NO `since` (it predates
+  this field, or a run dropped it), backfill it now — from evidence, else
+  this run's time — instead of carrying the omission forward forever: a
+  late-started clock understates the wait, but no clock hides it.
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a
   timestamp).
 - If there is truly nothing to say: empty `items`, headline "All quiet —
