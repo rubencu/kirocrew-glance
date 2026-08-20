@@ -359,6 +359,24 @@ demonstrably finished — or a 5-minute give-up clears a run that failed
 or never scheduled. The button stays disabled while pending, so a
 duplicate run cannot be queued by an impatient second click.
 
+## v2.5.4 — rule-coherence audit fixes
+
+A full fresh read of `curator.md` after nine incremental additions found
+two defects living in rule interactions rather than in any single rule.
+
+The `choices` source list named "an options trailer" as valid evidence —
+but a fresh trailer (<48h) means the UI already renders a live choice
+card and the "counts, not detail" rule forbids the item entirely, while a
+stale trailer is dead scrollback. The phrase could never legitimately
+fire, and reading it as license would re-open the v2.3.2 circular-
+curation hole. Removed, with the reasoning inlined.
+
+The bell predicate keyed on a NEW `now` id. An existing item escalating
+`soon` → `now` — a watched-unhealthy session that finally crashes — keeps
+its stable id, so the moment it became a demand on the human never rang
+the bell. Stable ids exist for UI dedup; the predicate now keys on
+newly-`now` (new id, or same id escalated from `soon`).
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
