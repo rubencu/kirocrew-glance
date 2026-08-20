@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, createElement as h, Fragment } from 'react
 import { useNavigate } from '@kirocrew/app-sdk'
 import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.5.2'
+const VERSION = '2.5.3'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -491,6 +491,12 @@ export default function GlanceApp() {
   const [sent, setSent] = useState(loadSentStore)
   const [sentFree, setSentFree] = useState(false)
   const timer = useRef(null)
+  // Refresh honesty: the POST returns in ~1s but the curator grinds for
+  // minutes. pendingSince holds the "regenerating…" state until the brief's
+  // generated_at moves past the click (or a timeout gives up), so the button
+  // cannot claim the work finished the moment the request was accepted.
+  const [pendingSince, setPendingSince] = useState(0)
+  const REFRESH_GIVE_UP_SECS = 300
 
   const poll = async () => {
     const t = Math.floor(Date.now() / 1000)
@@ -499,6 +505,9 @@ export default function GlanceApp() {
       const [lv, br] = await Promise.all([loadLive(), loadBrief(t)])
       setLive(lv)
       setBrief(br)
+      // A fresher brief than the click means the curator finished; a long
+      // silence means it failed or was never scheduled — stop claiming.
+      setPendingSince((p) => (p && ((br && br.generatedAt >= p) || t - p > REFRESH_GIVE_UP_SECS) ? 0 : p))
       if (br) {
         // Drop sent entries for items the curator resolved (and expired ones).
         setSent((p) => {
@@ -526,6 +535,7 @@ export default function GlanceApp() {
 
   const [refresh, refreshBusy, refreshFail] = useAction(async () => {
     await toAgent(REFRESH_MSG, CURATOR_SLOT)
+    setPendingSince(Math.floor(Date.now() / 1000))
   })
 
   const blockers = live ? extractBlockers(live, now) : []
@@ -548,7 +558,7 @@ export default function GlanceApp() {
             return next
           }),
           sentFree, onSentFree: () => setSentFree(true),
-          onRefresh: refresh, refreshBusy,
+          onRefresh: refresh, refreshBusy: refreshBusy || pendingSince > 0,
         }),
     refreshFail ? h(FailNote, { fail: refreshFail }) : null,
   )
