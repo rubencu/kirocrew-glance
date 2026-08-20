@@ -174,11 +174,13 @@ Rules:
   human can make and its `session` names the waiting agent, list the 2–4
   options THE WAITING AGENT ITSELF OFFERED, as short answers in the
   human's voice ("Squash with force-with-lease", "Leave it"). Valid
-  sources, in order: the waiting agent's live words this run (an options
-  trailer, a question it asked, its last message) — or, when its recent
-  messages are only heartbeats ("no material change") because the offer
-  has scrolled out of view, the SAME item (matching `id`) in the previous
-  brief, copied verbatim. That carry-over is republishing content this
+  sources, in order: the waiting agent's live words this run (a question
+  it asked, its last message — NOT an options trailer: a fresh trailer is
+  a live choice card the UI already shows, so the "counts, not detail"
+  rule forbids the item itself, and a stale one is dead scrollback) — or,
+  when its recent messages are only heartbeats ("no material change")
+  because the offer has scrolled out of view, the SAME item (matching
+  `id`) in the previous brief, copied verbatim. That carry-over is republishing content this
   item already showed, not new authority — the item itself must still
   re-earn its place each run, and if the item drops or the session moves
   on, its choices die with it; never resurrect choices for a new or
@@ -214,17 +216,20 @@ Rules:
   nothing needs you.", the `pulse` counts, and a `quiet` line with the idle
   count.
 
-## 4. Notify — only on a NEW `now` item
+## 4. Notify — only on a newly-`now` item
 
-Compare against the previous brief you read in step 2. If (and only if) this
-run produced a `now` item whose `id` was NOT in the previous brief's items,
+Compare against the previous brief you read in step 2. If (and only if)
+this run produced a `now` item that was NOT `now` in the previous brief —
+its `id` is new, OR the same `id` sat there at `soon` and escalated —
 publish ONE bell notification via the `send_notification` tool: title
-"Glance: needs you", body = the new item texts (joined, <=200 chars), normal
-priority, link to `/glance`. Rules:
+"Glance: needs you", body = the newly-`now` item texts (joined, <=200
+chars), normal priority, link to `/glance`. Ids are stable so the UI can
+dedup; a stable id must not swallow the moment an existing wait becomes a
+demand on the human. Rules:
 
-- At most one notification per run, covering all new `now` items together.
-- Never notify for `soon` items, re-worded existing items (same id), the
-  first brief ever written, or an all-quiet brief.
+- At most one notification per run, covering all newly-`now` items together.
+- Never notify for `soon` items, re-worded items whose priority did not
+  change, the first brief ever written, or an all-quiet brief.
 - If `send_notification` is unavailable, skip silently.
 
 Then stop. Do not send chat messages, do not start monitors, do not do the
