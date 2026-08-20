@@ -127,7 +127,16 @@ Also count the **pulse** — scale at a glance with zero per-agent detail
 - `working`: sessions with a running turn or an active nudge loop
 - `waiting`: sessions gated on the human — questions, approvals, option
   gates fresher than 48h, loops stopped pending a decision
-- `stalled`: marked running with no activity for >15 min
+- `stalled`: sessions you JUDGE to be stuck, not merely quiet. Silence
+  >15 min while marked running is the trigger to look, not the verdict:
+  read the session's `last_message` first. If it shows a long-running gate
+  legitimately in progress — a full test suite, a build, CI/review
+  polling, a wait/monitor cycle — that session is `working`, however long
+  it has been silent. Count `stalled` only when the silence is unexplained
+  or the last message shows distress (repeated errors, a dead loop, a
+  crash). Never emit a count your own `quiet` line argues against: if you
+  find yourself writing "counted stalled but probably fine", you have
+  already judged it working — count it that way.
 
 ## 3. Write the brief
 

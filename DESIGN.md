@@ -233,6 +233,26 @@ the LIVE words read this run — the covering session's or loop's own text.
 When the live words are silent or ambiguous about who holds the key, the
 gate is external, the weaker claim.
 
+## v2.3.7 — stalled is a judgment, not a timer
+
+Observed miss: a brief reported `pulse.stalled: 1` while its own `quiet`
+line explained that the counted session was "stalled only by the 15-min
+rule (18 min silent, likely a long gate run)" — the curator disbelieved its
+own count and published it anyway, rendered in warning color. On this host
+sessions routinely go silent for 20–60 minutes inside legitimate gates
+(full test suites, builds, CI polling), so the mechanical rule cries wolf,
+and a warning the reader learns to ignore hides the real stall when it
+comes.
+
+`stalled` was the last purely mechanical verdict left in the brief — the
+v2 thesis is that the agent reads so the human can glance, and every other
+signal already passed through judgment. Now silence >15 min is only the
+trigger to look: the curator reads the quiet session's `last_message`, and
+a long-running gate legitimately in progress counts as `working` no matter
+how long the silence. `stalled` is reserved for unexplained silence or
+visible distress. A coherence rule backs it: never publish a count your
+own `quiet` line argues against.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
