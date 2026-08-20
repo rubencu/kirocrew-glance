@@ -217,6 +217,22 @@ resolves to external (the weaker claim): a wrongly-demoted item costs one
 late escalation card, while a false "your click" teaches the human to
 distrust every `now`.
 
+## v2.3.6 — prior briefs may demote attribution, never promote it
+
+Observed miss, on the first run under v2.3.5: the "your click" item
+survived again. Mechanism: v2.3.5 listed "the previous brief's finding" as
+valid attribution evidence, and by then the wrong "your click" WAS the
+previous brief's finding — each run cited the last run, laundering the
+guess into evidence. The rule intended to stop invented attribution had
+created a self-citation channel for it.
+
+Fixed with an asymmetry. The previous brief is one-way evidence: it may
+confirm a gate is external (demote), but it can never establish that the
+human holds the key (promote). Human attribution must be re-earned from
+the LIVE words read this run — the covering session's or loop's own text.
+When the live words are silent or ambiguous about who holds the key, the
+gate is external, the weaker claim.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
