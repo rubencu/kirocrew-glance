@@ -88,6 +88,14 @@ const staleHtml = renderToStaticMarkup(h(Board, {
 }))
 assert.ok(staleHtml.includes('⚠ stale — written'), 'stale brief warning')
 
+// Held regeneration state: refreshBusy stays true until the curator's new
+// brief lands, so the label must persist, not flash for the POST only.
+const busyHtml = renderToStaticMarkup(h(Board, {
+  brief, blockers: [], now: NOW, navigate: noop, onAction: noop,
+  sent: {}, onSent: noop, sentFree: false, onSentFree: noop, onRefresh: noop, refreshBusy: true,
+}))
+assert.ok(busyHtml.includes('refreshing…'), 'held busy label while curator regenerates')
+
 // --- Empty brief: all-quiet state ---
 const quietBrief = { ...brief, items: [], headline: 'All quiet — nothing needs you.' }
 const quietHtml = renderToStaticMarkup(h(Board, {

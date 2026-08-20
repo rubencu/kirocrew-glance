@@ -343,6 +343,22 @@ slice — an over-budget line degrades honestly. Choice labels keep the
 hard slice: they are sent verbatim to sessions, and an added ellipsis
 would corrupt the guidance.
 
+## v2.5.3 — refresh must not claim to be done
+
+Observed in a fetch-loop audit: the ↻ refresh action fires the curator
+and its busy state spanned only the POST — the label flashed
+"refreshing…" for about a second and reverted to "as of 12m ago" while
+the curator actually grinds for one to two minutes. To the human the
+click looked like it did nothing, inviting a second click and a queued
+duplicate curator turn. The data path was always correct (the poll picks
+up the new brief); only the feedback lied.
+
+The click now records a pending timestamp, and the busy state holds
+until the polled brief's `generated_at` moves past it — the curator
+demonstrably finished — or a 5-minute give-up clears a run that failed
+or never scheduled. The button stays disabled while pending, so a
+duplicate run cannot be queued by an impatient second click.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
