@@ -117,6 +117,25 @@ test('parseBrief choices tolerate malformed shapes', () => {
   assert.deepEqual(b.items.find((i) => i.id === 'null').choices, [])
 })
 
+test('parseBrief parses since: epoch, millis, garbage, future-clamped', () => {
+  const items = [
+    { id: 'aged', priority: 'now', text: 'Waiting a while.', since: NOW - 21600 },
+    { id: 'millis', priority: 'now', text: 'Millis form.', since: (NOW - 3600) * 1000 },
+    { id: 'future', priority: 'now', text: 'Clock skew.', since: NOW + 9999 },
+    { id: 'garbage', priority: 'now', text: 'Bad value.', since: 'yesterday-ish' },
+    { id: 'absent', priority: 'now', text: 'No since.' },
+  ]
+  const b = parseBrief(validBrief({ items, generated_at: NOW - 300 }), NOW)
+  assert.equal(b.ok, true)
+  const get = (id) => b.items.find((i) => i.id === id)
+  assert.equal(get('aged').since, NOW - 21600)
+  assert.equal(get('millis').since, NOW - 3600)
+  // future values clamp to generated_at — age can never render negative
+  assert.equal(get('future').since, NOW - 300)
+  assert.equal(get('garbage').since, 0)
+  assert.equal(get('absent').since, 0)
+})
+
 test('parseBrief orders now → soon → fyi, stable within priority', () => {
   const items = [
     { id: 'f1', priority: 'fyi', text: 'fyi first' },
