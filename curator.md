@@ -112,6 +112,18 @@ do, an unhealthy run he should look at. Progress reports are noise.
   gate as external — the weaker claim. A wrongly-demoted item costs one
   late escalation card; a false "your click" trains the human to distrust
   every `now`.
+- **State external facts at their evidence age, never in the present
+  tense.** You see sessions, not the world: a PR's or ticket's state is
+  only as fresh as the last words some session wrote about it, and once
+  its monitor stops, that evidence only ages. Before asserting an
+  external object's state ("sits review-ready", "awaiting merge"), find
+  the newest words about it and date the claim from THEM: if the covering
+  session stopped hours ago, write "was review-ready when its monitor
+  stopped ~6h ago", not "sits review-ready". A brief that states
+  yesterday's reading as the present teaches the human to distrust every
+  line. When a fact matters and its evidence is stale, that staleness is
+  itself the finding — say "unwatched since ~6h, state unknown" and let
+  the unwatched-item card carry the action.
 
 Priorities: `now` = blocked on the human and losing value while it waits —
 a wait the human can END with a concrete move; `soon` = will need the human
