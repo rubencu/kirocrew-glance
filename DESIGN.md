@@ -394,6 +394,23 @@ than the curator's current framing: re-judging changes priority, text,
 action, and choices — never the id — and copying a previous item's `since`
 obliges keeping its id. New ids are for genuinely different blockers.
 
+## v2.5.6 — external facts carry their evidence age
+
+Observed miss: PR #4555 merged upstream at 03:57 UTC, but the briefs at
+08:12, 12:52, and 17:11 all asserted "#4555 sits review-ready on its
+external merge gate" as present-tense fact — a ~17-hour-stale reading.
+The PR's monitor had stopped (the unwatched-PRs item correctly flagged
+that), so no session wrote fresh words about it; the curator kept
+restating the last reading as the present. The 21:11 brief finally
+caught the merge and folded it into `quiet`.
+
+The curator sees sessions, not the world. New rule: an external object's
+state is only as fresh as the newest words some session wrote about it,
+and a claim must be dated from that evidence — "was review-ready when
+its monitor stopped ~6h ago", never "sits review-ready". When the
+evidence is stale, the staleness is itself the finding ("unwatched since
+~6h, state unknown"), and the unwatched-item card carries the action.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
