@@ -2,7 +2,7 @@
 // blocker extraction. Run: node --test tests/
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { toEpoch, rel, parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, STALE_AFTER, SENT_TTL_SECS } from '../ui/brief.mjs'
+import { toEpoch, rel, clip, parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, STALE_AFTER, SENT_TTL_SECS } from '../ui/brief.mjs'
 
 const NOW = 1_800_000_000
 
@@ -134,6 +134,29 @@ test('parseBrief parses since: epoch, millis, garbage, future-clamped', () => {
   assert.equal(get('future').since, NOW - 300)
   assert.equal(get('garbage').since, 0)
   assert.equal(get('absent').since, 0)
+})
+
+test('clip: word-boundary truncation with visible ellipsis', () => {
+  assert.equal(clip('short line', 200), 'short line')                      // under budget: untouched
+  const long = 'no questions or approvals; seventy seven idle sessions and nothing stalled anywhere tonight'
+  const c = clip(long, 60)
+  assert.ok(c.length <= 60)
+  assert.ok(c.endsWith('…'), 'must end with ellipsis: ' + c)
+  assert.ok(!c.slice(0, -1).endsWith(' '), 'no trailing space before ellipsis')
+  assert.ok(long.startsWith(c.slice(0, -1)), 'prefix preserved at a word boundary')
+  // no space late enough → hard cut, still ellipsised
+  assert.equal(clip('x'.repeat(100), 20).length, 20)
+  assert.ok(clip('x'.repeat(100), 20).endsWith('…'))
+})
+
+test('parseBrief clips over-budget quiet and headline at word boundaries', () => {
+  const b = parseBrief(validBrief({
+    quiet: 'word '.repeat(60).trim(),          // 299 chars
+    headline: 'head '.repeat(40).trim(),       // 199 chars
+  }), NOW)
+  assert.equal(b.ok, true)
+  assert.ok(b.quiet.length <= 200 && b.quiet.endsWith('…'))
+  assert.ok(b.headline.length <= 140 && b.headline.endsWith('…'))
 })
 
 test('parseBrief orders now → soon → fyi, stable within priority', () => {

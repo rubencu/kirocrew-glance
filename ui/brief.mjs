@@ -33,6 +33,15 @@ export const STALE_AFTER = 2700 // 45 min = 3 missed 15-min curator runs
 const MAX_ITEMS = 10
 const MAX_CHOICES = 4
 
+// Truncate at a word boundary with a visible ellipsis — a clamp that chops
+// mid-word looks like a rendering bug and hides that anything was lost.
+export function clip(s, max) {
+  if (s.length <= max) return s
+  const cut = s.slice(0, max - 1)
+  const sp = cut.lastIndexOf(' ')
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).trimEnd() + '…'
+}
+
 // Parse + validate the curator's brief.json content. Never throws.
 // Returns { ok:false, error } or
 // { ok:true, generatedAt, ageSecs, stale, headline, items, quiet }.
@@ -65,7 +74,7 @@ export function parseBrief(raw, now) {
     items.push({
       id: typeof it.id === 'string' && it.id.trim() ? it.id.trim() : 'item-' + i,
       priority: PRIORITIES.has(it.priority) ? it.priority : 'fyi',
-      text: it.text.trim().slice(0, 400),
+      text: clip(it.text.trim(), 400),
       session,
       action,
       choices,
@@ -87,10 +96,10 @@ export function parseBrief(raw, now) {
     generatedAt,
     ageSecs,
     stale: ageSecs > STALE_AFTER,
-    headline: typeof b.headline === 'string' ? b.headline.trim().slice(0, 140) : '',
+    headline: typeof b.headline === 'string' ? clip(b.headline.trim(), 140) : '',
     pulse,
     items,
-    quiet: typeof b.quiet === 'string' ? b.quiet.trim().slice(0, 200) : '',
+    quiet: typeof b.quiet === 'string' ? clip(b.quiet.trim(), 200) : '',
   }
 }
 
