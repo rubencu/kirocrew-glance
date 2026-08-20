@@ -160,7 +160,7 @@ Write **atomically** (temp file + `mv`) to
       "since": <unix epoch seconds when this blocker started waiting, integer>
     }
   ],
-  "quiet": "<one line: what you deliberately left out — completions, healthy progress, idle counts>"
+  "quiet": "<one line, <=200 chars: what you deliberately left out — counts over narration>"
 }
 ```
 
@@ -200,6 +200,14 @@ Rules:
   this field, or a run dropped it), backfill it now — from evidence, else
   this run's time — instead of carrying the omission forward forever: a
   late-started clock understates the wait, but no clock hides it.
+- `quiet` has a HARD budget: one line, 200 characters or fewer — the UI cuts
+  anything longer. Spend it on counts and categories ("2 loops finished
+  overnight; no questions or approvals; 77 idle"), not per-session
+  narration: "what each healthy agent is doing right now" is exactly the
+  reading the brief exists to spare. If you are naming individual sessions
+  in `quiet`, you are narrating — compress to a count and move on. The
+  reassurance clauses (no questions/approvals, idle count) are the line's
+  point; never let them be the part that gets cut.
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a
   timestamp).
 - If there is truly nothing to say: empty `items`, headline "All quiet —

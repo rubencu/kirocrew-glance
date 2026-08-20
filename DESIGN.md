@@ -324,6 +324,25 @@ it now — from evidence, else the run's time — instead of carrying the
 omission forward. A late-started clock understates the wait; no clock
 hides it.
 
+## v2.5.2 — the quiet line must fit its budget
+
+Observed miss: the live quiet line ran 314 characters against the UI's
+200-character clamp, so the board showed it chopped mid-word ("PR #4555
+stay") — and what got cut was exactly the reassurance half ("no
+questions, approvals … 77 idle sessions"), the clauses that make a quiet
+line worth reading. The line had also drifted into per-session narration
+("mid GPT review round, active 1m ago"), the reading the v2.1 no-narration
+policy exists to spare.
+
+Two-sided fix. Curator: `quiet` gets a hard 200-character budget spent on
+counts and categories, not named sessions — naming individual sessions in
+`quiet` is narrating; and the reassurance clauses must never be the part
+at risk of being cut. Parser: headline, item text, and quiet now truncate
+at a word boundary with a visible ellipsis instead of a silent mid-word
+slice — an over-budget line degrades honestly. Choice labels keep the
+hard slice: they are sent verbatim to sessions, and an added ellipsis
+would corrupt the guidance.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
