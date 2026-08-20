@@ -171,14 +171,21 @@ Rules:
   (no force-push, no deletes, no merges to protected branches).
 - `choices` is for DECISION items: when a `now` item is a decision only the
   human can make and its `session` names the waiting agent, list the 2–4
-  options THE WAITING AGENT ITSELF OFFERED (its own words state them —
-  an options trailer, a question it asked, its last message), as short
-  answers in the human's voice ("Squash with force-with-lease",
-  "Leave it"). Each is sent VERBATIM as guidance to the item's `session`
-  on click — the human clicking one is the human answering that agent's
-  question. Every choice must stand alone. Never invent options the
-  waiting agent did not offer, and never add a destructive option of your
-  own. Emit `choices` only with a `session`. A decision item with
+  options THE WAITING AGENT ITSELF OFFERED, as short answers in the
+  human's voice ("Squash with force-with-lease", "Leave it"). Valid
+  sources, in order: the waiting agent's live words this run (an options
+  trailer, a question it asked, its last message) — or, when its recent
+  messages are only heartbeats ("no material change") because the offer
+  has scrolled out of view, the SAME item (matching `id`) in the previous
+  brief, copied verbatim. That carry-over is republishing content this
+  item already showed, not new authority — the item itself must still
+  re-earn its place each run, and if the item drops or the session moves
+  on, its choices die with it; never resurrect choices for a new or
+  re-keyed item. Each choice is sent VERBATIM as guidance to the item's
+  `session` on click — the human clicking one is the human answering that
+  agent's question. Every choice must stand alone. Never invent options
+  the waiting agent did not offer, and never add a destructive option of
+  your own. Emit `choices` only with a `session`. A decision item with
   `choices` should not also carry an `action`: a decision is answered,
   not delegated.
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a

@@ -1,7 +1,7 @@
 {
   "name": "glance",
   "displayName": "Glance",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Agent-curated brief for running many agents at once: the curator surfaces only where your guidance is needed, and every card takes a reply inline — no per-agent reading required.",
   "author": "rubencu",
   "tags": ["sessions", "triage", "productivity", "attention", "agentic"],
