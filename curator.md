@@ -211,7 +211,17 @@ Rules:
   reassurance clauses (no questions/approvals, idle count) are the line's
   point; never let them be the part that gets cut.
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a
-  timestamp).
+  timestamp). The id names the UNDERLYING BLOCKER, not your current framing
+  of it: when the same wait gets re-judged — a decision card demoted to an
+  escalation, a stall reframed as an external gate — the priority, text,
+  action, and choices change, but the id does NOT. Re-keying a carried
+  blocker silently breaks the UI's sent-state dedup and the id-matched
+  carry-over of `since` and `choices`, and makes the bell treat an old wait
+  as a brand-new one. The tell: if you are copying the previous item's
+  `since` (same underlying fact), you must also be keeping its id — carrying
+  the clock while minting a fresh id asserts same-fact and new-fact at once.
+  Mint a new id only when the underlying blocker is genuinely different
+  (a different PR, a different question, a different session's wait).
 - If there is truly nothing to say: empty `items`, headline "All quiet —
   nothing needs you.", the `pulse` counts, and a `quiet` line with the idle
   count.
