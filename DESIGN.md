@@ -274,6 +274,24 @@ The curator may only list options the waiting agent itself offered (its
 options trailer, its question, its last message) — never invented
 alternatives, never a destructive addition of its own.
 
+## v2.4.1 — choices survive heartbeat scroll-out
+
+Observed miss, on the first run under v2.4.0: the live decision item kept
+naming its three options in prose but emitted no `choices`. The waiting
+monitor's recent messages were all heartbeats ("No material change;
+monitoring continues") — the original offer had scrolled out of the one
+message the curator can read, so the evidence-sourced rule correctly
+found no live options to cite. A persistent decision gate watched by a
+heartbeat-posting monitor is the COMMON case, and the rule as written
+could never fire for it.
+
+Choices may now also carry over verbatim from the same item (matching
+`id`) in the previous brief. This is not the v2.3.6 laundering channel:
+carry-over republishes content the item already displayed — the buttons
+carry exactly the claim the text carries — and grants no authority
+upgrade. The item must still re-earn its place every run; when it drops
+or is re-keyed, its choices die with it.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.
