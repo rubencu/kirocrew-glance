@@ -155,7 +155,8 @@ Write **atomically** (temp file + `mv`) to
       "priority": "now|soon",
       "text": "<one sentence, plain language>",
       "session": "<slot key if the item maps to one session, else omit>",
-      "action": { "label": "<=3 words, imperative>", "message": "<full self-contained instruction an agent can execute without this brief>" }
+      "action": { "label": "<=3 words, imperative>", "message": "<full self-contained instruction an agent can execute without this brief>" },
+      "choices": ["<short answer in the human's voice>", "..."]
     }
   ],
   "quiet": "<one line: what you deliberately left out — completions, healthy progress, idle counts>"
@@ -168,6 +169,18 @@ Rules:
   concrete asks) because it is sent verbatim to a fresh agent session.
 - `action.message` must never instruct anything destructive or irreversible
   (no force-push, no deletes, no merges to protected branches).
+- `choices` is for DECISION items: when a `now` item is a decision only the
+  human can make and its `session` names the waiting agent, list the 2–4
+  options THE WAITING AGENT ITSELF OFFERED (its own words state them —
+  an options trailer, a question it asked, its last message), as short
+  answers in the human's voice ("Squash with force-with-lease",
+  "Leave it"). Each is sent VERBATIM as guidance to the item's `session`
+  on click — the human clicking one is the human answering that agent's
+  question. Every choice must stand alone. Never invent options the
+  waiting agent did not offer, and never add a destructive option of your
+  own. Emit `choices` only with a `session`. A decision item with
+  `choices` should not also carry an `action`: a decision is answered,
+  not delegated.
 - Keep ids stable across runs so the UI can dedup ("pr-2431-review", not a
   timestamp).
 - If there is truly nothing to say: empty `items`, headline "All quiet —

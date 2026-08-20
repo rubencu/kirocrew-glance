@@ -31,6 +31,7 @@ export function rel(ts, now) {
 const PRIORITIES = new Set(['now', 'soon', 'fyi'])
 export const STALE_AFTER = 2700 // 45 min = 3 missed 15-min curator runs
 const MAX_ITEMS = 10
+const MAX_CHOICES = 4
 
 // Parse + validate the curator's brief.json content. Never throws.
 // Returns { ok:false, error } or
@@ -52,12 +53,22 @@ export function parseBrief(raw, now) {
       && typeof it.action.message === 'string' && it.action.message.trim()
       ? { label: it.action.label.trim().slice(0, 30), message: it.action.message.trim() }
       : null
+    const session = typeof it.session === 'string' ? it.session : ''
+    // Decision choices: one-click answers sent verbatim as guidance to the
+    // item's OWN session — meaningless without one, so dropped when absent.
+    const choices = session && Array.isArray(it.choices)
+      ? it.choices
+          .filter((c) => typeof c === 'string' && c.trim())
+          .map((c) => c.trim().slice(0, 60))
+          .slice(0, MAX_CHOICES)
+      : []
     items.push({
       id: typeof it.id === 'string' && it.id.trim() ? it.id.trim() : 'item-' + i,
       priority: PRIORITIES.has(it.priority) ? it.priority : 'fyi',
       text: it.text.trim().slice(0, 400),
-      session: typeof it.session === 'string' ? it.session : '',
+      session,
       action,
+      choices,
     })
   }
   // now first, then soon, then fyi; stable within a priority (curator's order).

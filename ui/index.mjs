@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, createElement as h, Fragment } from 'react
 import { useNavigate } from '@kirocrew/app-sdk'
 import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.3.7'
+const VERSION = '2.4.0'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -299,12 +299,20 @@ function BriefItem({ item, navigate, sent, onSent }) {
     setShowGuide(false)
     onSent(item.id, item.session)
   })
+  // A decision choice is the guidance, one click: the label goes verbatim to
+  // the item's session, exactly as if typed into guide….
+  const [sendChoice, choiceBusy, choiceFail] = useAction(async (choice) => {
+    await toAgent(choice, item.session)
+    onSent(item.id, item.session)
+  })
+  const anyBusy = busy || guideBusy || choiceBusy
+  const hasChoices = item.choices && item.choices.length > 0 && item.session
   const sentTo = sent[item.id] && sent[item.id].slot
-  return h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 2px', borderBottom: '1px solid var(--border)', minWidth: 0 } },
+  return h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 2px', borderBottom: '1px solid var(--border)', minWidth: 0, flexWrap: 'wrap' } },
     h('span', { style: { display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: PRIORITY_DOT[item.priority], flexShrink: 0, position: 'relative', top: -1 } }),
     h('div', { style: { minWidth: 0, flex: 1 } },
       h('span', { style: { fontSize: 13, color: 'var(--text)' } }, item.text),
-      fail || guideFail ? h(FailNote, { fail: fail || guideFail }) : null,
+      fail || guideFail || choiceFail ? h(FailNote, { fail: fail || guideFail || choiceFail }) : null,
     ),
     sentTo
       ? h('span', {
@@ -312,9 +320,14 @@ function BriefItem({ item, navigate, sent, onSent }) {
           style: { fontSize: 11, color: 'var(--ok, #047857)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
         }, '✓ sent — open ↗')
       : h(Fragment, null,
-          item.priority !== 'fyi' || item.action
-            ? h(GhostBtn, { disabled: busy || guideBusy, onClick: send }, item.action ? item.action.label : 'Handle it')
-            : null,
+          // A decision is answered, not delegated: choices displace the
+          // delegate button — spawning a helper to make the human's call is
+          // the wrong affordance.
+          hasChoices
+            ? item.choices.map((c) => h(GhostBtn, { key: c, disabled: anyBusy, onClick: () => sendChoice(c) }, c))
+            : (item.priority !== 'fyi' || item.action
+                ? h(GhostBtn, { disabled: anyBusy, onClick: send }, item.action ? item.action.label : 'Handle it')
+                : null),
           item.session
             ? (showGuide
                 ? h('input', {
@@ -324,7 +337,7 @@ function BriefItem({ item, navigate, sent, onSent }) {
                     style: { background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, width: 150, outline: 'none', flexShrink: 0 },
                   })
                 : h('button', {
-                    disabled: busy || guideBusy, onClick: () => setShowGuide(true),
+                    disabled: anyBusy, onClick: () => setShowGuide(true),
                     style: { background: 'transparent', color: MUTED, border: '1px dashed var(--border)', borderRadius: 9999, padding: '2px 9px', fontSize: 11, cursor: 'pointer', flexShrink: 0 },
                   }, 'guide…'))
             : null,
