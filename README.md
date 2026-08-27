@@ -7,6 +7,8 @@
 **The agent reads, you glance.** A KiroCrew app that replaces session-board
 scanning with an agent-curated brief.
 
+![The Glance board: live blockers on top, the curator's prioritized brief below, one text line to the agent](docs/screenshot-board.png)
+
 An LLM curator cron triages everything in flight on your KiroCrew host every
 15 minutes and writes a short prioritized brief — what needs you *now*, what
 needs you *soon*, what resolved while you were away — each item with one
@@ -18,6 +20,8 @@ suggested action. The UI is a single screen:
    delegates any item back to an agent.
 3. **One text line** — tell the agent anything; each message starts its own
    fresh background session.
+
+![Live blockers: choice, approval, and question cards, each answerable with one click](docs/screenshot-blockers.png)
 
 No sections to scan, no filters, no keyboard nav — v2 deleted the ~400 lines
 of client-side heuristics that approximated judgment, because the curator has
