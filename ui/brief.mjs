@@ -168,6 +168,16 @@ export function handlerSlotFor(itemId) {
   return 'glance-h-' + (safe || 'item')
 }
 
+// Fresh slot for each free-text "Tell the agent…" send: every message from
+// that bar starts its OWN session instead of appending to one shared
+// handler, so unrelated asks never share context or queue behind each
+// other. The 'glance-h-' prefix keeps these inside the curator's
+// own-plumbing exclusion (curator.md: glance-h-* is never curated). A short
+// random suffix disambiguates two sends landing in the same millisecond.
+export function freshChatSlot(nowMs = Date.now()) {
+  return 'glance-h-chat-' + nowMs.toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+}
+
 // ---------- sent-state ----------
 
 // Sent-state persists across reloads (localStorage) so an already-delegated

@@ -2,7 +2,7 @@
 // blocker extraction. Run: node --test tests/
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { toEpoch, rel, clip, parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, STALE_AFTER, SENT_TTL_SECS } from '../ui/brief.mjs'
+import { toEpoch, rel, clip, parseBrief, extractBlockers, blockerKey, handlerSlotFor, freshChatSlot, pruneSent, STALE_AFTER, SENT_TTL_SECS } from '../ui/brief.mjs'
 
 const NOW = 1_800_000_000
 
@@ -183,6 +183,15 @@ test('handlerSlotFor: stable, sanitized, clamped per-item slots', () => {
   assert.equal(handlerSlotFor(''), 'glance-h-item')
   assert.equal(handlerSlotFor(null), 'glance-h-item')
   assert.ok(handlerSlotFor('x'.repeat(100)).length <= 'glance-h-'.length + 32)
+})
+
+test('freshChatSlot: unique per send, inside the glance-h-* plumbing namespace', () => {
+  const a = freshChatSlot(NOW * 1000)
+  const b = freshChatSlot(NOW * 1000)
+  assert.ok(a.startsWith('glance-h-chat-'), 'curator must exclude it as own plumbing: ' + a)
+  assert.notEqual(a, b, 'two sends in the same millisecond get distinct sessions')
+  assert.ok(/^glance-h-chat-[a-z0-9]+-[a-z0-9]{4}$/.test(a), 'safe slot key: ' + a)
+  assert.ok(freshChatSlot().startsWith('glance-h-chat-')) // default clock
 })
 
 test('pruneSent keeps live+fresh entries, drops resolved/expired/malformed', () => {
