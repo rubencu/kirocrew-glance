@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" width="160" alt="Glance logo — an open eye with radar pulse arcs">
+</p>
+
 # Glance
 
 **The agent reads, you glance.** A KiroCrew app that replaces session-board

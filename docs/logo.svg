@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- BRIEF: Logo for Glance, the KiroCrew agent-curated brief app ("the agent reads, you glance").
+       Mark: rounded-square app tile, deep indigo-to-violet gradient; a minimal open eye with a
+       glowing violet iris; two radar-style pulse arcs sweeping up-right from the iris — continuity
+       with the app's existing nav icon (the curator scanning everything in flight). Self-contained
+       background, works on light and dark surfaces.
+       Editable regions: #background, #pulses, #eye, #iris. -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#312e81"/>
+      <stop offset="0.55" stop-color="#4c1d95"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.28" cy="0.18" r="0.95">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="irisGrad" cx="0.38" cy="0.34" r="0.85">
+      <stop offset="0" stop-color="#ede9fe"/>
+      <stop offset="0.35" stop-color="#c4b5fd"/>
+      <stop offset="0.75" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g id="background">
+    <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#bgGrad)"/>
+    <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#sheen)"/>
+  </g>
+
+  <g id="pulses" stroke="#ddd6fe" fill="none" stroke-linecap="round">
+    <path id="pulse-inner" d="M294.8 131.1 A150 150 0 0 1 385.9 201.0" stroke-width="17" opacity="0.95"/>
+    <path id="pulse-outer" d="M305.2 92.5 A190 190 0 0 1 420.5 181.0" stroke-width="13" opacity="0.5"/>
+  </g>
+
+  <g id="eye" stroke="#f5f3ff" stroke-width="25" fill="none" stroke-linecap="round">
+    <path id="upper-lid" d="M92 276 C156 168 356 168 420 276"/>
+    <path id="lower-lid" d="M92 276 C156 384 356 384 420 276"/>
+  </g>
+
+  <g id="iris" filter="url(#glow)">
+    <circle id="iris-ring" cx="256" cy="276" r="58" fill="url(#irisGrad)"/>
+    <circle id="pupil" cx="256" cy="276" r="24" fill="#2e1065"/>
+    <circle id="highlight" cx="238" cy="258" r="12" fill="#ffffff" opacity="0.9"/>
+  </g>
+</svg>
