@@ -49,8 +49,9 @@ v2 inverts it: **the agent reads, the human glances.**
 
 3. **Delegation** — each brief item has at most one button: the curator's
    suggested action, or generic "Handle it". Both send a self-contained
-   message into the `glance-handler` background slot via `POST /api/chat?ws=1`
-   and flip to "✓ sent — open ↗". A free-text bar posts to the same slot.
+   message into a `glance-h-*` background slot via `POST /api/chat?ws=1`
+   and flip to "✓ sent — open ↗". The free-text bar opens a NEW
+   `glance-h-chat-*` session per send.
    Refresh posts the curator procedure to `glance-curator`.
 
 ## Trust model
@@ -410,6 +411,23 @@ and a claim must be dated from that evidence — "was review-ready when
 its monitor stopped ~6h ago", never "sits review-ready". When the
 evidence is stale, the staleness is itself the finding ("unwatched since
 ~6h, state unknown"), and the unwatched-item card carries the action.
+
+## v2.5.8 — every free-text send opens its own session
+
+The "Tell the agent…" bar used to append every message to one shared
+`glance-handler` session. Unrelated asks therefore shared context and
+queued behind each other: a quick question typed while a delegated task
+was grinding in that session waited for it, and each new ask inherited
+the scrollback of every previous one. Delegated brief actions already got
+per-item sessions in v2.2 — the free-text bar was the leftover.
+
+Each send now creates a fresh `glance-h-chat-<ts36>-<rand>` slot
+(`freshChatSlot` in `ui/brief.mjs`), so every message from the bar starts
+a clean session. The prefix keeps these inside the curator's existing
+`glance-h-*` own-plumbing exclusion, and "✓ sent — open ↗" links to the
+session that send actually created (`sentFree` now holds the slot key,
+not a boolean). The per-card "guide…" inputs are unchanged — guidance
+must land in the session being steered.
 
 ## Known limits (v2.0)
 

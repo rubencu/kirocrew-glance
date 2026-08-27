@@ -13,9 +13,9 @@
 //   3. One free-text line to the agent.
 import { useState, useEffect, useRef, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
+import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, freshChatSlot, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.5.7'
+const VERSION = '2.5.8'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -369,9 +369,12 @@ function AgentBar({ onSent, navigate, sentFree }) {
   const [send, busy, fail] = useAction(async () => {
     const msg = text.trim()
     if (!msg) return
-    await toAgent(msg, HANDLER_SLOT)
+    // Every send opens a NEW session — free-text asks are unrelated to each
+    // other, so they must not share one handler session's context or queue.
+    const slot = freshChatSlot()
+    await toAgent(msg, slot)
     setText('')
-    onSent()
+    onSent(slot)
   })
   return h('div', { style: { marginTop: 14 } },
     h('div', { style: { display: 'flex', gap: 6 } },
@@ -384,7 +387,7 @@ function AgentBar({ onSent, navigate, sentFree }) {
       h(SolidBtn, { disabled: busy || !text.trim(), onClick: send }, 'Send'),
     ),
     sentFree ? h('span', {
-      onClick: () => navigate('/chat?sid=' + HANDLER_SLOT),
+      onClick: () => navigate('/chat?sid=' + encodeURIComponent(sentFree)),
       style: { fontSize: 11, color: 'var(--ok, #047857)', cursor: 'pointer' },
     }, '✓ sent — open ↗') : null,
     h(FailNote, { fail }),
@@ -498,7 +501,9 @@ export default function GlanceApp() {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [err, setErr] = useState('')
   const [sent, setSent] = useState(loadSentStore)
-  const [sentFree, setSentFree] = useState(false)
+  // Last free-text send's slot key ('' = none yet) — the "open ↗" link
+  // must point at the session that send actually created.
+  const [sentFree, setSentFree] = useState('')
   const timer = useRef(null)
   // Refresh honesty: the POST returns in ~1s but the curator grinds for
   // minutes. pendingSince holds the "regenerating…" state until the brief's
@@ -566,7 +571,7 @@ export default function GlanceApp() {
             saveSentStore(next)
             return next
           }),
-          sentFree, onSentFree: () => setSentFree(true),
+          sentFree, onSentFree: (slot) => setSentFree(slot),
           onRefresh: refresh, refreshBusy: refreshBusy || pendingSince > 0,
         }),
     refreshFail ? h(FailNote, { fail: refreshFail }) : null,

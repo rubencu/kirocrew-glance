@@ -12,8 +12,8 @@ suggested action. The UI is a single screen:
    directly and answerable inline (these must never be stale).
 2. **The brief** — the curator's judgment in plain language. One click
    delegates any item back to an agent.
-3. **One text line** — tell the agent anything; it lands in a background
-   session.
+3. **One text line** — tell the agent anything; each message starts its own
+   fresh background session.
 
 No sections to scan, no filters, no keyboard nav — v2 deleted the ~400 lines
 of client-side heuristics that approximated judgment, because the curator has
