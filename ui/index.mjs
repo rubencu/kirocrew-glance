@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, createElement as h, Fragment } from 'react
 import { useNavigate } from '@kirocrew/app-sdk'
 import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, pruneSent, rel } from './brief.mjs'
 
-const VERSION = '2.5.6'
+const VERSION = '2.5.7'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -28,6 +28,7 @@ const ACCENT_TINT = 'rgba(124, 58, 237, .14)'
 const AIM = '#8b5cf6'
 const AIM_TINT = 'rgba(139, 92, 246, .16)'
 const DANGER = 'var(--danger, #b91c1c)'
+const DANGER_TINT = 'rgba(185, 28, 28, .12)'
 const WARN = '#b45309'
 const MUTED = 'var(--muted)'
 const PRIORITY_DOT = { now: DANGER, soon: WARN, fyi: 'var(--border)' }
@@ -108,12 +109,20 @@ function Pill({ bg, fg, children }) {
 }
 
 function GhostBtn({ onClick, disabled, children, danger }) {
+  // Hover highlight (inline styles can't do :hover): tint the pill and firm
+  // up the border so choice chips read as clickable before you commit.
+  const [hover, setHover] = useState(false)
+  const hot = hover && !disabled
   return h('button', {
     onClick, disabled,
+    onMouseEnter: () => setHover(true),
+    onMouseLeave: () => setHover(false),
     style: {
-      background: 'transparent', color: disabled ? MUTED : (danger ? DANGER : ACCENT),
-      border: `1px solid ${danger ? DANGER : ACCENT_TINT}`, padding: '3px 11px', borderRadius: 9999,
+      background: hot ? (danger ? DANGER_TINT : ACCENT_TINT) : 'transparent',
+      color: disabled ? MUTED : (danger ? DANGER : ACCENT),
+      border: `1px solid ${danger ? DANGER : (hot ? ACCENT : ACCENT_TINT)}`, padding: '3px 11px', borderRadius: 9999,
       fontSize: 11, fontWeight: 500, cursor: disabled ? 'default' : 'pointer', whiteSpace: 'nowrap',
+      transition: 'background .12s ease, border-color .12s ease',
     },
   }, children)
 }
