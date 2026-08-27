@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="12" cy="12" r="2"/>
-  <path d="M12 6a6 6 0 0 1 6 6"/>
-  <path d="M12 2a10 10 0 0 1 10 10"/>
-  <path d="M12 18a6 6 0 0 1-6-6"/>
-  <path d="M12 22A10 10 0 0 1 2 12"/>
+  <!-- Glance mark: eye + iris + one radar pulse arc ("the agent reads, you glance").
+       currentColor so it follows the dashboard theme. -->
+  <path id="upper-lid" d="M2 13C5 8 19 8 22 13"/>
+  <path id="lower-lid" d="M2 13C5 18 19 18 22 13"/>
+  <circle id="iris" cx="12" cy="13" r="2.4" fill="currentColor" stroke="none"/>
+  <path id="pulse" d="M13.9 5.8A7.5 7.5 0 0 1 18.5 9.25" stroke-width="1.6" opacity="0.75"/>
 </svg>
