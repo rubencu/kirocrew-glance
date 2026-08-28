@@ -6,7 +6,7 @@ import { strict as assert } from 'node:assert'
 import { createElement as h } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import GlanceApp, { Board } from './index.test-rewired.mjs'
-import { parseBrief, extractBlockers } from '../ui/brief.mjs'
+import { parseBrief, extractBlockers, extractLoops } from '../ui/brief.mjs'
 
 const NOW = 1_800_000_000
 
@@ -43,9 +43,19 @@ const blockers = extractBlockers({
 }, NOW)
 assert.equal(blockers.length, 5, 'question, approval, plan, choice, bgApproval')
 
+const loops = extractLoops({
+  enabled: true,
+  loops: [
+    { id: 'lp1', slot_key: 'monitor-slot', message: 'Watch PR #2431 CI; fix findings; stop when green.\nfull rules…', cycle_count: 19, max_cycles: 45, active: true, next_due_ts: NOW + 5 * 3600, approval_stalled: false },
+    { id: 'lp2', slot_key: 'exit-gate', message: 'Babysit the exit-gate rollout.', cycle_count: 46, max_cycles: 48, active: true, next_due_ts: NOW - 30, approval_stalled: true },
+    { id: 'lp3', slot_key: 'gone', message: 'finished loop must not render', cycle_count: 9, max_cycles: 9, active: false, next_due_ts: 0 },
+  ],
+}, [{ key: 'monitor-slot', title: 'PR babysit' }], NOW)
+assert.equal(loops.length, 2, 'inactive loop dropped')
+
 const noop = () => {}
 const html = renderToStaticMarkup(h(Board, {
-  brief, blockers, now: NOW, navigate: noop, onAction: noop,
+  brief, blockers, loops, now: NOW, navigate: noop, onAction: noop,
   sent: { done: { slot: 'glance-handler', ts: NOW - 30 } }, onSent: noop, sentFree: '', onSentFree: noop,
   onRefresh: noop, refreshBusy: false,
 }))
@@ -73,12 +83,20 @@ const mustContain = [
   'PLAN GATE', 'Go All',                                  // plan gate
   'Strip it back', 'Park it',                             // choice card
   'cron:log-patrol',                                      // bg approval card
+  // loops strip
+  'Loops · 2',
+  'PR babysit', 'cycle 19/45', 'next in 5h',              // scheduled loop w/ resolved title
+  'exit-gate', 'cycle 46/48', 'due now',                  // near-cap, overdue loop (key as title)
+  'approval stalled',                                     // stalled badge
+  'Watch PR #2431 CI',                                    // first-line summary
   'Tell the agent…',                                      // free-text bar
 ]
 for (const s of mustContain) {
   assert.ok(html.includes(s), `board HTML missing: ${s}`)
 }
 assert.ok(!html.includes('research worker'), 'app-owned slot must be hidden')
+assert.ok(!html.includes('finished loop'), 'inactive loop must not render')
+assert.ok(!html.includes('full rules…'), 'only the first message line renders')
 
 // --- Stale brief warns ---
 const staleBrief = { ...brief, stale: true }
@@ -87,6 +105,7 @@ const staleHtml = renderToStaticMarkup(h(Board, {
   sent: {}, onSent: noop, sentFree: false, onSentFree: noop, onRefresh: noop, refreshBusy: false,
 }))
 assert.ok(staleHtml.includes('⚠ stale — written'), 'stale brief warning')
+assert.ok(!staleHtml.includes('Loops ·'), 'no strip when loops are absent (default prop)')
 
 // Held regeneration state: refreshBusy stays true until the curator's new
 // brief lands, so the label must persist, not flash for the POST only.

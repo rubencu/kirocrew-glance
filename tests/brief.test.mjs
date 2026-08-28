@@ -2,7 +2,7 @@
 // blocker extraction. Run: node --test tests/
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { toEpoch, rel, clip, parseBrief, extractBlockers, blockerKey, handlerSlotFor, freshChatSlot, pruneSent, STALE_AFTER, SENT_TTL_SECS } from '../ui/brief.mjs'
+import { toEpoch, rel, until, clip, parseBrief, extractBlockers, blockerKey, extractLoops, handlerSlotFor, freshChatSlot, pruneSent, STALE_AFTER, SENT_TTL_SECS, LOOP_SUMMARY_MAX } from '../ui/brief.mjs'
 
 const NOW = 1_800_000_000
 
@@ -22,6 +22,85 @@ test('rel formats past durations', () => {
   assert.equal(rel(NOW - 7200, NOW), '2h')
   assert.equal(rel(NOW - 3 * 86400, NOW), '3d')
   assert.equal(rel(NOW + 999, NOW), '0s') // future clamps to 0
+})
+
+test('until formats future durations and blanks past/due', () => {
+  assert.equal(until(NOW + 45, NOW), '45s')
+  assert.equal(until(NOW + 120, NOW), '2m')
+  assert.equal(until(NOW + 7200, NOW), '2h')
+  assert.equal(until(NOW + 3 * 86400, NOW), '3d')
+  assert.equal(until(NOW, NOW), '')       // due exactly now
+  assert.equal(until(NOW - 60, NOW), '')  // overdue
+  assert.equal(until(null, NOW), '')      // no schedule
+})
+
+// ---------- extractLoops ----------
+
+function loopFixture(over = {}) {
+  return {
+    id: 'aaaa1111',
+    slot_key: 'chat-64',
+    message: 'Watch PR #123 until checks are green, then stop.\nCycle rules: poll CI, fix findings…',
+    idle_secs: 21600,
+    max_cycles: 45,
+    cycle_count: 19,
+    active: true,
+    next_due_ts: NOW + 5 * 3600,
+    approval_stalled: false,
+    ...over,
+  }
+}
+
+test('extractLoops maps active loops, resolves slot titles, sorts by next fire', () => {
+  const slots = [{ key: 'chat-64', title: 'Cradle migration babysit' }]
+  const loops = extractLoops({
+    enabled: true,
+    loops: [
+      loopFixture(),
+      loopFixture({ id: 'bbbb2222', slot_key: 'glance-handler', message: 'Babysit the store-listing issue.', next_due_ts: NOW + 600, cycle_count: 4, max_cycles: 48 }),
+    ],
+  }, slots, NOW)
+  assert.equal(loops.length, 2)
+  // Soonest fire first.
+  assert.equal(loops[0].id, 'bbbb2222')
+  assert.equal(loops[0].title, 'glance-handler') // no slot entry → key as title
+  assert.equal(loops[1].title, 'Cradle migration babysit')
+  assert.equal(loops[1].cycle, 19)
+  assert.equal(loops[1].maxCycles, 45)
+  assert.equal(loops[1].nextDueTs, NOW + 5 * 3600)
+  assert.equal(loops[1].stalled, false)
+})
+
+test('extractLoops keeps only the first message line, within the clip budget', () => {
+  const long = 'A'.repeat(300) + '\nsecond line never shown'
+  const [lp] = extractLoops({ loops: [loopFixture({ message: long })] }, [], NOW)
+  assert.ok(lp.summary.length <= LOOP_SUMMARY_MAX)
+  assert.ok(!lp.summary.includes('second line'))
+  const [short] = extractLoops({ loops: [loopFixture({ message: 'Short headline.\nrest' })] }, [], NOW)
+  assert.equal(short.summary, 'Short headline.')
+})
+
+test('extractLoops drops inactive loops and tolerates garbage', () => {
+  assert.deepEqual(extractLoops(null, [], NOW), [])
+  assert.deepEqual(extractLoops({ enabled: false, loops: [] }, [], NOW), [])
+  assert.deepEqual(extractLoops({ loops: 'nope' }, [], NOW), [])
+  assert.deepEqual(extractLoops({ loops: [null, 42, loopFixture({ active: false })] }, [], NOW), [])
+  // Missing/garbage fields default rather than throw; unscheduled sorts last.
+  const loops = extractLoops({
+    loops: [
+      loopFixture({ id: '', message: null, cycle_count: 'x', max_cycles: null, next_due_ts: null, approval_stalled: 1 }),
+      loopFixture({ id: 'scheduled' }),
+    ],
+  }, undefined, NOW)
+  assert.equal(loops.length, 2)
+  assert.equal(loops[0].id, 'scheduled')
+  const bare = loops[1]
+  assert.equal(bare.id, 'loop-chat-64')
+  assert.equal(bare.summary, '')
+  assert.equal(bare.cycle, 0)
+  assert.equal(bare.maxCycles, 0)
+  assert.equal(bare.nextDueTs, 0)
+  assert.equal(bare.stalled, true)
 })
 
 // ---------- parseBrief ----------
