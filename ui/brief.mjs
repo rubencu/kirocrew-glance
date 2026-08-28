@@ -26,6 +26,17 @@ export function rel(ts, now) {
   return Math.floor(d / 86400) + 'd'
 }
 
+// Future-relative duration: '45s' / '12m' / '3h' / '2d'; '' once due or past
+// (the caller decides how to say "due now").
+export function until(ts, now) {
+  const d = toEpoch(ts) - now
+  if (d <= 0) return ''
+  if (d < 60) return Math.floor(d) + 's'
+  if (d < 3600) return Math.floor(d / 60) + 'm'
+  if (d < 86400) return Math.floor(d / 3600) + 'h'
+  return Math.floor(d / 86400) + 'd'
+}
+
 // ---------- the brief (agent-written, we just validate) ----------
 
 const PRIORITIES = new Set(['now', 'soon', 'fyi'])
@@ -156,6 +167,43 @@ export function blockerKey(b) {
   if (b.kind === 'question') return 'q-' + b.asks[0].ask_id
   if (b.kind === 'bgApproval') return 'bga-' + b.appr.id
   return b.kind + '-' + (b.slot ? b.slot.key : '?')
+}
+
+// ---------- monitor loops (read-only ambient status) ----------
+
+// Map the /api/autonudge payload to display rows. Read-only by design: the
+// strip shows what the babysit loops are doing; controlling a loop stays in
+// the session that owns it (and the dashboard's own loop popover). A loop's
+// message is its full standing instruction — often a page of it — so only
+// the first line is surfaced; that is the loop's self-given headline.
+// Unlike blockers, app-owned slots are NOT hidden here: a loop on a
+// plumbing slot is still a real loop the human may be waiting on.
+export const LOOP_SUMMARY_MAX = 120
+
+export function extractLoops(payload, slots, now) {
+  const loops = payload && typeof payload === 'object' && Array.isArray(payload.loops) ? payload.loops : []
+  const byKey = new Map((Array.isArray(slots) ? slots : []).map((s) => [s.key, s]))
+  const out = []
+  for (const lp of loops) {
+    if (!lp || typeof lp !== 'object' || !lp.active) continue
+    const slotKey = typeof lp.slot_key === 'string' ? lp.slot_key : ''
+    const slot = byKey.get(slotKey)
+    const firstLine = typeof lp.message === 'string' ? (lp.message.split('\n', 1)[0] || '').trim() : ''
+    out.push({
+      id: typeof lp.id === 'string' && lp.id ? lp.id : 'loop-' + slotKey,
+      slotKey,
+      title: (slot && slot.title) || slotKey,
+      summary: clip(firstLine, LOOP_SUMMARY_MAX),
+      cycle: typeof lp.cycle_count === 'number' && Number.isFinite(lp.cycle_count) ? lp.cycle_count : 0,
+      maxCycles: typeof lp.max_cycles === 'number' && Number.isFinite(lp.max_cycles) ? lp.max_cycles : 0,
+      nextDueTs: toEpoch(lp.next_due_ts),
+      stalled: Boolean(lp.approval_stalled),
+    })
+  }
+  // Soonest-firing first; loops with no scheduled fire sink to the bottom.
+  const due = (l) => l.nextDueTs || Number.MAX_SAFE_INTEGER
+  out.sort((a, b) => due(a) - due(b))
+  return out
 }
 
 // ---------- delegation ----------

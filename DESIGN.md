@@ -429,6 +429,28 @@ session that send actually created (`sentFree` now holds the slot key,
 not a boolean). The per-card "guide…" inputs are unchanged — guidance
 must land in the session being steered.
 
+## v2.6.0 — loops on the board (read-only)
+
+Babysit loops (`monitor_start`) are the third kind of live agent state a
+multi-agent operator tracks — alongside blockers and the brief — but they
+lived only in the dashboard's per-session popover, one session at a time.
+The board now shows an ambient **Loops** strip: every active loop from
+`/api/autonudge` (already in the app's API grants), one row each — slot
+link, the first line of the loop's standing instruction as its headline,
+cycle progress, next-fire countdown, and an amber `approval stalled`
+badge. Cycle count turns amber within 3 cycles of the cap, because a loop
+that coasts into `max_cycles` did not finish — it ran out of rope.
+
+Deliberately read-only: a loop is steered or stopped from the session
+that owns it (or the dashboard popover), not from the board — Glance
+renders judgment, it does not own control planes. And unlike blockers,
+app-owned slots are NOT hidden here: a loop on a plumbing slot is still a
+real loop the human may be waiting on. Summaries stay client-derived
+(first message line) rather than curator-written, keeping the strip live
+at poll cadence with zero extra agent cost; if first lines prove to be
+poor headlines in practice, curator-distilled summaries are the upgrade
+path.
+
 ## Known limits (v2.0)
 
 - Brief freshness is poll-based (15 min + manual refresh); no push.

@@ -13,9 +13,9 @@
 //   3. One free-text line to the agent.
 import { useState, useEffect, useRef, createElement as h, Fragment } from 'react'
 import { useNavigate } from '@kirocrew/app-sdk'
-import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, freshChatSlot, pruneSent, rel } from './brief.mjs'
+import { parseBrief, extractBlockers, blockerKey, handlerSlotFor, freshChatSlot, pruneSent, rel, until, extractLoops } from './brief.mjs'
 
-const VERSION = '2.5.9'
+const VERSION = '2.6.0'
 const BRIEF_PATH = '~/.kiro/crew/workspace/glance/brief.json'
 const HANDLER_SLOT = 'glance-handler'
 const CURATOR_SLOT = 'glance-curator'
@@ -51,16 +51,18 @@ async function post(url, body) {
 }
 
 async function loadLive() {
-  const [slots, questions, approvals] = await Promise.all([
+  const [slots, questions, approvals, nudge] = await Promise.all([
     fetchJson('/api/chat/slots').catch(() => []),
     fetchJson('/api/ask-question/pending').catch(() => []),
     fetchJson('/api/approvals').catch(() => []),
+    fetchJson('/api/autonudge').catch(() => null),
   ])
   const appr = Array.isArray(approvals) ? approvals : (approvals.approvals || approvals.pending || [])
   return {
     slots: Array.isArray(slots) ? slots : [],
     questions: Array.isArray(questions) ? questions : [],
     approvals: appr,
+    nudge,
   }
 }
 
@@ -435,7 +437,33 @@ function Pulse({ pulse }) {
   return h('div', { style: { fontSize: 12, marginBottom: 6 } }, ...joined)
 }
 
-export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, sentFree, onSentFree, onRefresh, refreshBusy }) {
+// ---------- monitor loops (read-only) ----------
+
+function LoopRow({ lp, now, navigate }) {
+  // A loop coasting into its cycle cap did not finish — it ran out of rope.
+  // Surface that in the same amber as other needs-a-look states.
+  const nearCap = lp.maxCycles > 0 && lp.maxCycles - lp.cycle <= 3
+  const u = lp.nextDueTs ? until(lp.nextDueTs, now) : ''
+  const nextTxt = lp.nextDueTs ? (u ? 'next in ' + u : 'due now') : ''
+  return h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 2px', borderBottom: '1px solid var(--border)', minWidth: 0 } },
+    h('span', { style: { display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: lp.stalled ? WARN : ACCENT, flexShrink: 0, position: 'relative', top: -1, animation: 'glancePulse 2.4s ease-in-out infinite' } }),
+    h(SlotLink, { slotKey: lp.slotKey, title: lp.title, navigate }),
+    h('span', { style: { fontSize: 12, color: MUTED, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 } }, lp.summary),
+    lp.stalled ? h(Pill, { bg: 'rgba(180, 83, 9, .14)', fg: WARN }, 'approval stalled') : null,
+    h('span', { style: { fontSize: 10, color: nearCap ? WARN : MUTED, whiteSpace: 'nowrap', flexShrink: 0 } },
+      'cycle ' + lp.cycle + (lp.maxCycles ? '/' + lp.maxCycles : '') + (nextTxt ? ' · ' + nextTxt : '')),
+  )
+}
+
+function LoopsStrip({ loops, now, navigate }) {
+  if (!loops.length) return null
+  return h('div', { style: { marginTop: 14 } },
+    h('div', { style: { fontSize: 12, fontWeight: 600, color: MUTED, marginBottom: 2 } }, 'Loops · ' + loops.length),
+    ...loops.map((lp) => h(LoopRow, { key: lp.id, lp, now, navigate })),
+  )
+}
+
+export function Board({ brief, blockers, loops = [], now, navigate, onAction, sent, onSent, sentFree, onSentFree, onRefresh, refreshBusy }) {
   const approvals = blockers.filter((b) => b.kind === 'approval' || b.kind === 'bgApproval')
   return h('div', null,
     // Live blockers — interactive, never stale.
@@ -467,6 +495,9 @@ export function Board({ brief, blockers, now, navigate, onAction, sent, onSent, 
           h('div', { style: { fontSize: 13, color: MUTED, marginBottom: 8 } }, 'No brief yet — the curator writes one every 15 minutes.'),
           h(SolidBtn, { disabled: refreshBusy, onClick: onRefresh }, refreshBusy ? 'writing…' : 'Write the first brief'),
         ),
+    // Ambient: what the babysit loops are watching. Read-only — a loop is
+    // steered from its own session, not from the board.
+    h(LoopsStrip, { loops, now, navigate }),
     h(AgentBar, { onSent: onSentFree, navigate, sentFree }),
   )
 }
@@ -553,6 +584,7 @@ export default function GlanceApp() {
   })
 
   const blockers = live ? extractBlockers(live, now) : []
+  const loops = live ? extractLoops(live.nudge, live.slots, now) : []
 
   return h('div', { style: { padding: '14px 18px', maxWidth: 980, margin: '0 auto', fontFamily: 'inherit' } },
     h('style', null, '@keyframes glancePulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }'),
@@ -564,7 +596,7 @@ export default function GlanceApp() {
     live === null && brief === null
       ? h('div', { style: { fontSize: 12, color: MUTED } }, 'loading…')
       : h(Board, {
-          brief, blockers, now, navigate,
+          brief, blockers, loops, now, navigate,
           onAction: poll,
           sent, onSent: (id, target) => setSent((p) => {
             const next = { ...p, [id]: { slot: target || HANDLER_SLOT, ts: Math.floor(Date.now() / 1000) } }
