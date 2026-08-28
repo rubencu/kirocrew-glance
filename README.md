@@ -4,18 +4,25 @@
 
 # Glance
 
-**The agent reads, you glance.** A KiroCrew app that replaces session-board
-scanning with an agent-curated brief.
+**The agent reads, you glance.**
+
+Running several agents at once makes *you* the bottleneck: a dozen sessions,
+each needing a scroll-through just to find the one question that actually
+blocks progress. Glance flips that. A curator agent reads everything in
+flight on your KiroCrew host and hands you a short brief, so your attention
+goes only where it changes an outcome.
 
 ![The Glance board: live blockers on top, the curator's prioritized brief below, one text line to the agent](docs/screenshot-board.png)
 
-An LLM curator cron triages everything in flight on your KiroCrew host every
-15 minutes and writes a short prioritized brief — what needs you *now*, what
-needs you *soon*, what resolved while you were away — each item with one
-suggested action. The UI is a single screen:
+Every 15 minutes the curator triages all your sessions and writes a
+prioritized brief: what needs you **now**, what needs you **soon**, and what
+resolved while you were away — each item with one suggested action. Between
+briefs, anything that blocks an agent surfaces live, the moment it happens.
+
+## One screen, three parts
 
 1. **Live blockers** — pending questions, approvals, and plan gates, polled
-   directly and answerable inline (these must never be stale).
+   directly and answerable inline. An answer box is never stale.
 2. **The brief** — the curator's judgment in plain language. One click
    delegates any item back to an agent.
 3. **One text line** — tell the agent anything; each message starts its own
@@ -23,9 +30,10 @@ suggested action. The UI is a single screen:
 
 ![Live blockers: choice, approval, and question cards, each answerable with one click](docs/screenshot-blockers.png)
 
-No sections to scan, no filters, no keyboard nav — v2 deleted the ~400 lines
-of client-side heuristics that approximated judgment, because the curator has
-the real thing. See `DESIGN.md` for the paradigm and architecture.
+Nothing to scan, filter, or configure. The curator decides what deserves your
+attention, and whatever it left out is accounted for in a single closing line
+— so an empty board really means nothing needs you. Curious how it works?
+See [DESIGN.md](DESIGN.md).
 
 ## Install
 
